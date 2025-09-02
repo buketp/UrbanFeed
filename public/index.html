@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yerel Basın</title>
+  <style>
+    :root{
+      --bg:#f4f6f8; --card:#fff; --text:#222; --muted:#666; --pill:#eef1f5;
+      --b:#e5e9ef; --shadow:0 10px 24px rgba(0,0,0,.06); --radius:16px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      background:var(--bg); color:var(--text);
+    }
+    .container{max-width:960px; margin:32px auto; padding:0 16px}
+    header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px}
+    h1{margin:0; font-size:28px; letter-spacing:.2px}
+    .controls{
+      display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:center
+    }
+    .chip{
+      border:1px solid var(--b); background:var(--pill); padding:8px 12px; border-radius:999px;
+      font-size:14px; cursor:pointer; user-select:none
+    }
+    .chip.active{background:#14213d; color:#fff; border-color:#14213d}
+    .field{display:flex; gap:8px; align-items:center}
+    input[type="text"]{
+      border:1px solid var(--b); background:#fff; border-radius:10px; padding:8px 12px; min-width:160px
+    }
+    button.refresh{
+      border:0; background:#14213d; color:#fff; border-radius:10px; padding:8px 12px; cursor:pointer
+    }
+    #meta{color:var(--muted); margin:6px 0 16px 0; font-size:14px}
+
+    .card{
+      background:var(--card); border:1px solid var(--b); border-radius:var(--radius);
+      box-shadow:var(--shadow); padding:16px; margin:12px 0
+    }
+    .card a.title{color:#0b57d0; font-weight:700; font-size:18px; text-decoration:underline}
+    .summary{color:#333; margin-top:8px}
+    .sub{color:var(--muted); font-size:13px; margin-top:6px}
+    .tags{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
+    .tag{background:var(--pill); border:1px solid var(--b); padding:4px 8px; border-radius:999px; font-size:12px}
+    .cat{display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:8px}
+    .cat.şikayet{background:#ffe5e5; border:1px solid #ffc9c9}
+    .cat.soru{background:#eaf5ff; border:1px solid #cfe7ff}
+    .cat.istek{background:#e8ffe8; border:1px solid #c7f3c7}
+    .cat.öneri{background:#fff5e0; border:1px solid #ffe0a8}
+    .loading{opacity:.6; pointer-events:none}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Yerel Haberler</h1>
+    </header>
+
+    <div class="controls">
+      <div class="field">
+        <label for="province">İl:</label>
+        <input id="province" type="text" value="Sivas" />
+      </div>
+
+      <div class="field" style="flex:1 1 auto">
+        <input id="search" type="text" placeholder="Başlık/özet/etiket ara..." style="width:100%" />
+      </div>
+
+      <!-- app.js'in beklediği ID -->
+      <button id="btn-refresh" class="refresh">Yenile</button>
+    </div>
+
+    <div class="controls" id="chips">
+      <span class="chip active" data-cat="all">Hepsi</span>
+      <span class="chip" data-cat="şikayet">Şikayet</span>
+      <span class="chip" data-cat="öneri">Öneri</span>
+      <span class="chip" data-cat="soru">Soru</span>
+      <span class="chip" data-cat="istek">İstek</span>
+    </div>
+
+    <div id="meta">Toplam haber: —</div>
+
+    <!-- liste alanı -->
+    <div id="list"></div>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
