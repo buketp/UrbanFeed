@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="tr">
 <head>
@@ -8,6 +9,7 @@
     :root{
       --bg:#f4f6f8; --card:#fff; --text:#222; --muted:#666; --pill:#eef1f5;
       --b:#e5e9ef; --shadow:0 10px 24px rgba(0,0,0,.06); --radius:16px;
+      --primary:#14213d; --danger:#dc3545;
     }
     *{box-sizing:border-box}
     body{
@@ -15,6 +17,30 @@
       background:var(--bg); color:var(--text);
     }
     .container{max-width:960px; margin:32px auto; padding:0 16px}
+    
+    /* Login Styles */
+    .login-form{
+      max-width:400px; margin:100px auto; padding:32px; background:var(--card);
+      border:1px solid var(--b); border-radius:var(--radius); box-shadow:var(--shadow);
+    }
+    .login-form h1{text-align:center; margin-bottom:24px}
+    .form-group{margin-bottom:16px}
+    .form-group label{display:block; margin-bottom:4px; font-weight:600}
+    .form-group input{
+      width:100%; padding:12px; border:1px solid var(--b); border-radius:8px;
+      font-size:14px;
+    }
+    .btn{
+      padding:12px 24px; border:0; border-radius:8px; cursor:pointer; font-size:14px;
+      font-weight:600; text-decoration:none; display:inline-block; text-align:center;
+    }
+    .btn-primary{background:var(--primary); color:#fff}
+    .btn:hover{opacity:.9}
+    .error{color:var(--danger); margin-top:8px; font-size:14px}
+    .hidden{display:none}
+    .loading{opacity:.6; pointer-events:none}
+    
+    /* Main App Styles */
     header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px}
     h1{margin:0; font-size:28px; letter-spacing:.2px}
     .controls{
@@ -48,14 +74,36 @@
     .cat.soru{background:#eaf5ff; border:1px solid #cfe7ff}
     .cat.istek{background:#e8ffe8; border:1px solid #c7f3c7}
     .cat.öneri{background:#fff5e0; border:1px solid #ffe0a8}
-    .loading{opacity:.6; pointer-events:none}
-    .hidden{display:none}
+    
+    .logout-btn{
+      background:var(--danger); color:#fff; border:0; padding:8px 16px; border-radius:8px;
+      cursor:pointer; font-size:14px; margin-left:16px;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
+  <!-- Login Form -->
+  <div id="loginSection" class="login-form">
+    <h1>Giriş Yap</h1>
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="username">Kullanıcı Adı:</label>
+        <input type="text" id="username" required />
+      </div>
+      <div class="form-group">
+        <label for="password">Şifre:</label>
+        <input type="password" id="password" required />
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%">Giriş Yap</button>
+      <div id="loginError" class="error hidden"></div>
+    </form>
+  </div>
+
+  <!-- Main App -->
+  <div id="mainApp" class="container hidden">
     <header>
       <h1>Yerel Haberler</h1>
+      <button id="logoutBtn" class="logout-btn">Çıkış</button>
     </header>
 
     <div class="controls">

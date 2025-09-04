@@ -1,7 +1,13 @@
+
 (() => {
+  // ====== Login Sistemi ======
+  const LOGIN_CREDENTIALS = {
+    username: "admin",
+    password: "admin123"
+  };
+
   // ====== Ayarlar / API anahtarı (opsiyonel) ======
-  // GET isteklerinde zorunlu değil ama sunucunda kontrol varsa doldur:
-  const API_KEY = "SENIN_API_KEYIN"; // Replit Secrets'taki ile aynı
+  const API_KEY = "SENIN_API_KEYIN";
 
   // ---- UI state
   const state = {
@@ -12,6 +18,16 @@
   };
 
   // ---- DOM refs
+  const loginEls = {
+    loginSection: document.getElementById("loginSection"),
+    mainApp: document.getElementById("mainApp"),
+    loginForm: document.getElementById("loginForm"),
+    loginError: document.getElementById("loginError"),
+    logoutBtn: document.getElementById("logoutBtn"),
+    username: document.getElementById("username"),
+    password: document.getElementById("password")
+  };
+
   const els = {
     province: document.getElementById("province"),
     search: document.getElementById("search"),
@@ -21,21 +37,65 @@
     list: document.getElementById("list"),
   };
 
-  // ---- helpers
+  // ---- Login Functions ----
+  function checkAuth() {
+    return sessionStorage.getItem("userLoggedIn") === "true";
+  }
+
+  function showLoginForm() {
+    loginEls.loginSection.classList.remove("hidden");
+    loginEls.mainApp.classList.add("hidden");
+  }
+
+  function showMainApp() {
+    loginEls.loginSection.classList.add("hidden");
+    loginEls.mainApp.classList.remove("hidden");
+    // İl bilgisini yeniden set et ve verileri yükle
+    els.province && (els.province.value = state.province);
+    loadList();
+  }
+
+  function login(username, password) {
+    if (username === LOGIN_CREDENTIALS.username && password === LOGIN_CREDENTIALS.password) {
+      sessionStorage.setItem("userLoggedIn", "true");
+      loginEls.loginError.classList.add("hidden");
+      showMainApp();
+      return true;
+    } else {
+      loginEls.loginError.textContent = "Kullanıcı adı veya şifre hatalı!";
+      loginEls.loginError.classList.remove("hidden");
+      return false;
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem("userLoggedIn");
+    showLoginForm();
+    loginEls.loginForm.reset();
+  }
+
+  // ---- Login Event Listeners ----
+  loginEls.loginForm && loginEls.loginForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const username = loginEls.username.value.trim();
+    const password = loginEls.password.value;
+    login(username, password);
+  });
+
+  loginEls.logoutBtn && loginEls.logoutBtn.addEventListener("click", logout);
+
+  // ---- helpers (aynı kaldı) ----
   function qs() {
     const u = new URLSearchParams();
     if (state.province) u.set("province", state.province);
     if (state.category && state.category !== "all") u.set("category", state.category);
     if (state.q) u.set("q", state.q);
     if (state.limit) u.set("limit", String(state.limit));
-    // /api/ai-news zaten aiOnly=true yapıyor; /api/news kullanırsan:
-    // u.set("aiOnly", "false");
     return u.toString();
   }
 
   async function fetchJSON(url, options) {
     const headers = { Accept: "application/json" };
-    // API anahtarını opsiyonel olarak gönder
     if (API_KEY && String(API_KEY).trim().length > 0) {
       headers["x-api-key"] = API_KEY;
     }
@@ -70,7 +130,6 @@
       "'": "&#39;",
     })[m]);
 
-  // boş/undefined’ı ayıkla, string’e çevir, kırp
   const toArray = (v) =>
     Array.isArray(v)
       ? v.map((x) => String(x ?? "").trim()).filter(Boolean)
@@ -86,14 +145,12 @@
     return isNaN(d) ? "" : d.toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
   };
 
-  // Tag’i tek # ile göster (gelen #’lıysa tekrar ekleme)
   const showTag = (raw) => {
     const t = String(raw || "").trim();
     if (!t) return "";
     return t.startsWith("#") ? t : `#${t}`;
   };
 
-  // ---- normalize backend item (PublishedAt / publishedAt farkını tolere et)
   function normalize(it = {}) {
     const publishedAt = it.publishedAt || it.PublishedAt || it.createdAt || "";
     const tags = uniq(toArray(it.tags));
@@ -110,7 +167,6 @@
     };
   }
 
-  // ---- card renderer (AI text + tags)
   function renderItem(raw) {
     const it = normalize(raw);
 
@@ -145,7 +201,6 @@
       els.list && (els.list.innerHTML = "");
       els.meta && (els.meta.textContent = "Yükleniyor…");
 
-      // Sadece AI metni olan kayıtları çek
       const url = `/api/ai-news?${qs()}`;
       const { ok = false, count = 0, data = [] } = await fetchJSON(url);
 
@@ -169,7 +224,7 @@
     }
   }
 
-  // ---- events
+  // ---- Main App Events (aynı kaldı) ----
   els.chips &&
     els.chips.addEventListener("click", (ev) => {
       const chip = ev.target.closest(".chip");
@@ -195,8 +250,12 @@
       }
     });
 
+  // ---- Initialize ----
   window.addEventListener("DOMContentLoaded", () => {
-    els.province && (els.province.value = state.province);
-    loadList();
+    if (checkAuth()) {
+      showMainApp();
+    } else {
+      showLoginForm();
+    }
   });
 })();
