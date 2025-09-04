@@ -372,8 +372,13 @@ app.delete("/api/news", requireApiKey, async (_req, res) => {
   }
 });
 
+// ---------- Admin route ----------
+app.get("/admin", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+
 // ---------- SPA fallback (API dışı GET istekleri index.html'e düşsün) ----------
-app.get(/^\/(?!api)(?!__whoami)(?!health).*/, (_req, res) => {
+app.get(/^\/(?!api)(?!__whoami)(?!health)(?!admin).*/, (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 

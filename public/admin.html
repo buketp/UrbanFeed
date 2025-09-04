@@ -1,0 +1,153 @@
+
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Paneli - Yerel Basın</title>
+  <style>
+    :root{
+      --bg:#f4f6f8; --card:#fff; --text:#222; --muted:#666; --pill:#eef1f5;
+      --b:#e5e9ef; --shadow:0 10px 24px rgba(0,0,0,.06); --radius:16px;
+      --primary:#14213d; --danger:#dc3545; --success:#28a745;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      background:var(--bg); color:var(--text);
+    }
+    .container{max-width:1200px; margin:32px auto; padding:0 16px}
+    
+    .login-form{
+      max-width:400px; margin:100px auto; padding:32px; background:var(--card);
+      border:1px solid var(--b); border-radius:var(--radius); box-shadow:var(--shadow);
+    }
+    .login-form h1{text-align:center; margin-bottom:24px}
+    .form-group{margin-bottom:16px}
+    .form-group label{display:block; margin-bottom:4px; font-weight:600}
+    .form-group input{
+      width:100%; padding:12px; border:1px solid var(--b); border-radius:8px;
+      font-size:14px;
+    }
+    .btn{
+      padding:12px 24px; border:0; border-radius:8px; cursor:pointer; font-size:14px;
+      font-weight:600; text-decoration:none; display:inline-block; text-align:center;
+    }
+    .btn-primary{background:var(--primary); color:#fff}
+    .btn-danger{background:var(--danger); color:#fff}
+    .btn-success{background:var(--success); color:#fff}
+    .btn:hover{opacity:.9}
+    
+    .admin-header{
+      display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;
+      padding:16px; background:var(--card); border:1px solid var(--b); border-radius:var(--radius);
+    }
+    
+    .stats{
+      display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px;
+    }
+    .stat-card{
+      padding:20px; background:var(--card); border:1px solid var(--b); border-radius:var(--radius);
+      text-align:center;
+    }
+    .stat-number{font-size:32px; font-weight:700; color:var(--primary)}
+    .stat-label{color:var(--muted); margin-top:4px}
+    
+    .news-table{
+      background:var(--card); border:1px solid var(--b); border-radius:var(--radius);
+      overflow:hidden;
+    }
+    .news-table table{width:100%; border-collapse:collapse}
+    .news-table th, .news-table td{padding:12px; text-align:left; border-bottom:1px solid var(--b)}
+    .news-table th{background:var(--pill); font-weight:600}
+    .news-table tr:hover{background:var(--pill)}
+    
+    .error{color:var(--danger); margin-top:8px; font-size:14px}
+    .hidden{display:none}
+    .loading{opacity:.6; pointer-events:none}
+    
+    .pagination{
+      display:flex; justify-content:center; align-items:center; gap:8px; margin-top:16px;
+    }
+    .pagination button{
+      padding:8px 12px; border:1px solid var(--b); background:var(--card);
+      border-radius:4px; cursor:pointer;
+    }
+    .pagination button:hover{background:var(--pill)}
+    .pagination button:disabled{opacity:.5; cursor:not-allowed}
+  </style>
+</head>
+<body>
+  <!-- Login Form -->
+  <div id="loginSection" class="login-form">
+    <h1>Admin Girişi</h1>
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="username">Kullanıcı Adı:</label>
+        <input type="text" id="username" required />
+      </div>
+      <div class="form-group">
+        <label for="password">Şifre:</label>
+        <input type="password" id="password" required />
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%">Giriş Yap</button>
+      <div id="loginError" class="error hidden"></div>
+    </form>
+  </div>
+
+  <!-- Admin Panel -->
+  <div id="adminSection" class="container hidden">
+    <div class="admin-header">
+      <h1>Admin Paneli</h1>
+      <div>
+        <span id="welcomeText">Hoşgeldiniz</span>
+        <button id="logoutBtn" class="btn btn-danger" style="margin-left:16px">Çıkış</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-number" id="totalNews">-</div>
+        <div class="stat-label">Toplam Haber</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="aiNews">-</div>
+        <div class="stat-label">AI İşlenmiş</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="todayNews">-</div>
+        <div class="stat-label">Bugünkü Haberler</div>
+      </div>
+    </div>
+
+    <div class="news-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Başlık</th>
+            <th>İl</th>
+            <th>Kategori</th>
+            <th>Kaynak</th>
+            <th>Tarih</th>
+            <th>İşlemler</th>
+          </tr>
+        </thead>
+        <tbody id="newsTableBody">
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pagination">
+      <button id="prevBtn" disabled>« Önceki</button>
+      <span id="pageInfo">Sayfa 1</span>
+      <button id="nextBtn">Sonraki »</button>
+    </div>
+
+    <div style="margin-top:24px; text-align:center">
+      <button id="clearAllBtn" class="btn btn-danger">Tüm Haberleri Temizle</button>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>
