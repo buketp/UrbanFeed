@@ -25,31 +25,6 @@
   const nextBtn = document.getElementById("nextBtn");
   const pageInfo = document.getElementById("pageInfo");
   const clearAllBtn = document.getElementById("clearAllBtn");
-  
-  // Navigation elements
-  const navBtns = document.querySelectorAll(".nav-btn");
-  const sections = document.querySelectorAll(".section");
-  
-  // City sources elements
-  const citySelect = document.getElementById("citySelect");
-  const citySourceForm = document.getElementById("citySourceForm");
-  const selectedCityTitle = document.getElementById("selectedCityTitle");
-  const sourceName = document.getElementById("sourceName");
-  const sourceUrl = document.getElementById("sourceUrl");
-  const sourceCategory = document.getElementById("sourceCategory");
-  const addSourceBtn = document.getElementById("addSourceBtn");
-  const sourcesList = document.getElementById("sourcesList");
-  
-  // Sample city sources data (in real app, this would come from database)
-  let citySources = {
-    "Sivas": [
-      {name: "Sivas Haber", url: "https://sivashaber.com", category: "şikayet"},
-      {name: "Sivas Gündem", url: "https://sivasgundem.com", category: "öneri"}
-    ],
-    "Ankara": [
-      {name: "Ankara Haberleri", url: "https://ankarahaberleri.com", category: "soru"}
-    ]
-  };
 
   // Check if already logged in
   if (sessionStorage.getItem("adminLoggedIn") === "true") {
@@ -81,43 +56,6 @@
   });
 
   // Clear all news handler
-  // Navigation handlers
-  navBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const section = btn.dataset.section;
-      switchSection(section);
-    });
-  });
-  
-  // City source handlers
-  citySelect.addEventListener("change", () => {
-    const selectedCity = citySelect.value;
-    if (selectedCity) {
-      showCitySourceForm(selectedCity);
-      loadCitySources(selectedCity);
-    } else {
-      hideCitySourceForm();
-      sourcesList.innerHTML = "<p>Bir şehir seçin...</p>";
-    }
-  });
-  
-  addSourceBtn.addEventListener("click", () => {
-    const city = citySelect.value;
-    const name = sourceName.value.trim();
-    const url = sourceUrl.value.trim();
-    const category = sourceCategory.value;
-    
-    if (!city || !name || !url) {
-      alert("Lütfen tüm alanları doldurun!");
-      return;
-    }
-    
-    addCitySource(city, { name, url, category });
-    sourceName.value = "";
-    sourceUrl.value = "";
-    loadCitySources(city);
-  });
-
   clearAllBtn.addEventListener("click", async () => {
     if (!confirm("Tüm haberleri silmek istediğinizden emin misiniz?")) return;
 
@@ -161,73 +99,8 @@
     loginSection.classList.add("hidden");
     adminSection.classList.remove("hidden");
     welcomeText.textContent = `Hoşgeldiniz, ${ADMIN_CREDENTIALS.username}`;
-    switchSection("dashboard");
-  }
-  
-  function switchSection(sectionName) {
-    // Update navigation buttons
-    navBtns.forEach(btn => {
-      if (btn.dataset.section === sectionName) {
-        btn.classList.add("active");
-      } else {
-        btn.classList.remove("active");
-      }
-    });
-    
-    // Update sections
-    sections.forEach(section => {
-      if (section.id === sectionName + "Section") {
-        section.classList.add("active");
-        section.style.display = "block";
-      } else {
-        section.classList.remove("active");
-        section.style.display = "none";
-      }
-    });
-    
-    // Load appropriate data
-    if (sectionName === "dashboard") {
-      loadStats();
-    } else if (sectionName === "news-list") {
-      loadNews();
-    }
-  }
-  
-  function showCitySourceForm(city) {
-    citySourceForm.classList.remove("hidden");
-    selectedCityTitle.textContent = `${city} için Kaynak Ekle`;
-  }
-  
-  function hideCitySourceForm() {
-    citySourceForm.classList.add("hidden");
-  }
-  
-  function addCitySource(city, source) {
-    if (!citySources[city]) {
-      citySources[city] = [];
-    }
-    citySources[city].push(source);
-    
-    // In real app, this would be saved to database
-    console.log("Added source:", { city, source });
-    alert(`${source.name} kaynağı ${city} şehrine eklendi!`);
-  }
-  
-  function loadCitySources(city) {
-    const sources = citySources[city] || [];
-    
-    if (sources.length === 0) {
-      sourcesList.innerHTML = `<p>${city} için henüz kaynak eklenmemiş.</p>`;
-      return;
-    }
-    
-    sourcesList.innerHTML = sources.map(source => `
-      <div class="source-item">
-        <h4>${escapeHtml(source.name)}</h4>
-        <p>Kategori: <span style="background:var(--pill); padding:2px 6px; border-radius:4px">${escapeHtml(source.category)}</span></p>
-        <a href="${escapeHtml(source.url)}" target="_blank">${escapeHtml(source.url)}</a>
-      </div>
-    `).join("");
+    loadStats();
+    loadNews();
   }
 
   async function loadStats() {
