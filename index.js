@@ -1,3 +1,4 @@
+// index.js (ESM)
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -7,6 +8,7 @@ import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
 import pkg from "pg";
+import crypto from "node:crypto"; // ⬅️ fingerprint için
 const { Pool } = pkg;
 
 dotenv.config({ override: true });
@@ -19,12 +21,7 @@ const API_KEY = process.env.API_KEY;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ---------- PostgreSQL Pool (YEREL) ----------
-/*
-  .env örneği:
-    DATABASE_URL=postgresql://local@127.0.0.1:5432/pressdb
-  Yerel Postgres için SSL kullanmıyoruz.
-*/
+// ---------- PostgreSQL Pool ----------
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 10,
@@ -50,14 +47,28 @@ function ensureStringArray(val) {
     .map((v) => (typeof v === "string" ? v.trim() : ""))
     .filter((v) => v.length > 0);
 }
-
 function toIsoOrNull(s) {
   if (!s) return null;
   const d = new Date(s);
   return isNaN(d) ? null : d.toISOString();
 }
+function parseBooleanish(v, fallback = false) {
+  if (v === undefined || v === null) return fallback;
+  const s = String(v).toLowerCase().trim();
+  if (["1", "true", "yes", "on"].includes(s)) return true;
+  if (["0", "false", "no", "off"].includes(s)) return false;
+  return fallback;
+}
+// url + içerik bazlı fingerprint (deterministik)
+function makeFingerprint(url, text) {
+  const base =
+    String(url ?? "").trim() +
+    "|" +
+    String(text ?? "").trim().toLowerCase();
+  return crypto.createHash("md5").update(base).digest("hex");
+}
 
-// Tek bir haber satırını ortak SELECT ile okuma
+// Tek bir haber satırını ortak SELECT ile okuma (şimdilik kullanılmıyor ama dursun)
 async function fetchNewsByUrl(url) {
   const q = `
     select id,
@@ -152,13 +163,18 @@ const NewsSchema = z.object({
   tweetText: z.string().max(280).optional(),
 });
 
-// ---------- CREATE (Upsert + update) ----------
+// ---------- CREATE (Upsert + update, fingerprint ile) ----------
 app.post("/api/news", requireApiKey, async (req, res) => {
-  console.log(">>> Yeni haber isteği geldi:", JSON.stringify(req.body, null, 2));
+  console.log(
+    ">>> Yeni haber isteği geldi:",
+    JSON.stringify(req.body, null, 2),
+  );
 
   const parsed = NewsSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "Doğrulama hatası", details: parsed.error.flatten() });
+    return res
+      .status(400)
+      .json({ error: "Doğrulama hatası", details: parsed.error.flatten() });
   }
 
   const d = parsed.data;
@@ -166,13 +182,16 @@ app.post("/api/news", requireApiKey, async (req, res) => {
   const tags = ensureStringArray(d.tags);
   const pubAt = toIsoOrNull(d.publishedAt);
 
+  // url + içerikten fingerprint üret (tweetText yoksa summary, o da yoksa title)
+  const fp = makeFingerprint(d.url, d.tweetText ?? d.summary ?? d.title);
+
   try {
     const insertSql = `
       insert into news
-        (id, source, province, title, url, category, tags, summary, published_at, tweet_text, created_at)
+        (id, fingerprint, source, province, title, url, category, tags, summary, published_at, tweet_text, created_at)
       values
-        ($1,  $2,    $3,       $4,   $5,  $6,       $7::text[], $8,    coalesce($9::timestamptz, now()), $10, now())
-      on conflict (url) do update
+        ($1, $2,         $3,     $4,      $5,   $6,  $7,       $8::text[], $9,      coalesce($10::timestamptz, now()), $11, now())
+      on conflict (fingerprint) do update
       set
         -- AI'den tweetText geldiyse güncelle
         tweet_text = coalesce(excluded.tweet_text, news.tweet_text),
@@ -191,6 +210,7 @@ app.post("/api/news", requireApiKey, async (req, res) => {
         province = coalesce(excluded.province, news.province),
         title    = coalesce(excluded.title,    news.title),
         summary  = coalesce(excluded.summary,  news.summary),
+        url      = coalesce(excluded.url,      news.url),
         published_at = coalesce(excluded.published_at, news.published_at)
       returning id, source, province, title, url, category, tags, summary,
                 published_at as "publishedAt", tweet_text as "tweetText",
@@ -198,31 +218,43 @@ app.post("/api/news", requireApiKey, async (req, res) => {
     `;
 
     const insertVals = [
-      id, d.source, d.province, d.title, d.url, d.category,
-      tags, d.summary ?? null, pubAt, d.tweetText ?? null,
+      id,
+      fp,
+      d.source,
+      d.province,
+      d.title,
+      d.url,
+      d.category,
+      tags,
+      d.summary ?? null,
+      pubAt,
+      d.tweetText ?? null,
     ];
 
     const r = await pool.query(insertSql, insertVals);
     return res.status(201).json({ ok: true, data: r.rows[0] });
   } catch (e) {
     console.error("DB upsert error:", e);
-    res.status(500).json({ ok: false, error: "DB upsert error", detail: e.message });
+    res
+      .status(500)
+      .json({ ok: false, error: "DB upsert error", detail: e.message });
   }
 });
 
-
 // ---------- READ (liste) ----------
-// Ör: /api/news?source=ai&province=Sivas&category=öneri&q=finans&aiOnly=1&limit=50&order=desc
-app.get("/api/news", async (req, res) => {
+async function getNewsHandler(req, res) {
   const {
     source,
     province,
     category,
     q,
-    aiOnly,
     limit = 50,
+    offset = 0,
     order = "desc",
+    aiOnly: aiOnlyParam, // true|false|1|0|yes|no...
   } = req.query;
+
+  const aiOnly = parseBooleanish(aiOnlyParam, false);
 
   const where = [];
   const params = [];
@@ -239,7 +271,7 @@ app.get("/api/news", async (req, res) => {
     params.push(String(category));
     where.push(`category = $${params.length}`);
   }
-  if (aiOnly === "1") {
+  if (aiOnly) {
     where.push(`tweet_text is not null and length(trim(tweet_text)) > 0`);
   }
   if (q) {
@@ -258,7 +290,14 @@ app.get("/api/news", async (req, res) => {
     Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 500
       ? rawLimit
       : 50;
+
+  // offset güvenliği
+  const rawOffset = parseInt(offset, 10);
+  const safeOffset =
+    Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
   params.push(safeLimit);
+  params.push(safeOffset);
 
   // sıralama
   const direction = String(order).toLowerCase() === "asc" ? "asc" : "desc";
@@ -272,75 +311,28 @@ app.get("/api/news", async (req, res) => {
       from news
      ${where.length ? "where " + where.join(" and ") : ""}
      order by coalesce(published_at, created_at) ${direction}
-     limit $${params.length};
+     limit $${params.length - 1}
+     offset $${params.length};
   `;
 
   try {
     const r = await pool.query(sql, params);
-    res.json({ ok: true, count: r.rowCount, data: r.rows });
+    res.json({ ok: true, aiOnly, count: r.rowCount, data: r.rows });
   } catch (e) {
     console.error("DB query error:", e);
     res
       .status(500)
       .json({ ok: false, error: "DB query error", detail: e.message });
   }
-});
+}
 
-// ---------- SADECE AI içeren kayıtlar (kısa yol) ----------
-app.get("/api/ai-news", async (req, res) => {
-  const { province, category, q, limit = 50, order = "desc" } = req.query;
+// Ör: /api/news?source=ai&province=Sivas&category=öneri&q=finans&aiOnly=true&limit=50&offset=0&order=desc
+app.get("/api/news", getNewsHandler);
 
-  const where = ["tweet_text is not null and length(trim(tweet_text)) > 0"];
-  const params = [];
-
-  if (province) {
-    params.push(String(province));
-    where.push(`lower(province) = lower($${params.length})`);
-  }
-  if (category) {
-    params.push(String(category));
-    where.push(`category = $${params.length}`);
-  }
-  if (q) {
-    params.push(`%${String(q).toLowerCase()}%`);
-    const i = params.length;
-    where.push(
-      `(lower(tweet_text) like $${i} or exists (
-         select 1 from unnest(coalesce(tags,'{}')) t where lower(t) like $${i}
-       ))`,
-    );
-  }
-
-  const rawLimit = parseInt(limit, 10);
-  const safeLimit =
-    Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 500
-      ? rawLimit
-      : 50;
-  params.push(safeLimit);
-
-  const direction = String(order).toLowerCase() === "asc" ? "asc" : "desc";
-
-  const sql = `
-    select id,
-           created_at   as "createdAt",
-           source, province, title, url, category, tags,
-           published_at as "publishedAt",
-           tweet_text   as "tweetText"
-      from news
-     where ${where.join(" and ")}
-     order by coalesce(published_at, created_at) ${direction}
-     limit $${params.length};
-  `;
-
-  try {
-    const r = await pool.query(sql, params);
-    res.json({ ok: true, count: r.rowCount, data: r.rows });
-  } catch (e) {
-    console.error("DB ai-news error:", e);
-    res
-      .status(500)
-      .json({ ok: false, error: "DB query error", detail: e.message });
-  }
+// ---------- SADECE AI içerenler (kısa yol/proxy) ----------
+app.get("/api/ai-news", (req, res) => {
+  req.query.aiOnly = "true"; // zorunlu AI-only
+  return getNewsHandler(req, res);
 });
 
 // ---------- Ek debug endpointler ----------

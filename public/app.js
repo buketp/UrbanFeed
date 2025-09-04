@@ -1,4 +1,8 @@
 (() => {
+  // ====== Ayarlar / API anahtarı (opsiyonel) ======
+  // GET isteklerinde zorunlu değil ama sunucunda kontrol varsa doldur:
+  const API_KEY = "SENIN_API_KEYIN"; // Replit Secrets'taki ile aynı
+
   // ---- UI state
   const state = {
     province: "Sivas",
@@ -24,18 +28,28 @@
     if (state.category && state.category !== "all") u.set("category", state.category);
     if (state.q) u.set("q", state.q);
     if (state.limit) u.set("limit", String(state.limit));
+    // /api/ai-news zaten aiOnly=true yapıyor; /api/news kullanırsan:
+    // u.set("aiOnly", "false");
     return u.toString();
   }
 
   async function fetchJSON(url, options) {
+    const headers = { Accept: "application/json" };
+    // API anahtarını opsiyonel olarak gönder
+    if (API_KEY && String(API_KEY).trim().length > 0) {
+      headers["x-api-key"] = API_KEY;
+    }
+
     const r = await fetch(url, {
-      headers: { Accept: "application/json" },
+      headers,
       cache: "no-store",
       ...options,
     });
+
     const text = await r.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch {}
+
     if (!r.ok) {
       const msg =
         (data && (data.detail || data.error)) ||
@@ -110,13 +124,17 @@
 
     return `
       <div class="card">
-        <div class="summary">${ESC(it.tweetText) || "(AI mesajı yok)"}</div>
-        <div class="sub">
-          ${ESC(it.source || "Kaynak")} • ${catHtml}
-          ${it.publishedAt ? ` • ${ESC(fmtDate(it.publishedAt))}` : ""}
-          • <a href="${ESC(it.url)}" target="_blank" rel="noopener">habere git</a>
+        <div style="margin-bottom:6px">
+          <a class="title" href="${ESC(it.url)}" target="_blank" rel="noopener noreferrer">
+            ${ESC(it.title) || "(başlık yok)"}
+          </a>
         </div>
-        <div class="tags">${tagsHtml}</div>
+        ${it.tweetText ? `<div class="summary">${ESC(it.tweetText)}</div>` : ''}
+        <div class="sub">
+          ${ESC(it.province || "-")} • ${catHtml}
+          ${it.publishedAt ? ` • ${ESC(fmtDate(it.publishedAt))}` : ""}
+        </div>
+        ${tagsHtml ? `<div class="tags">${tagsHtml}</div>` : ""}
       </div>
     `;
   }
@@ -127,11 +145,9 @@
       els.list && (els.list.innerHTML = "");
       els.meta && (els.meta.textContent = "Yükleniyor…");
 
-      // Sadece AI metni olan kayıtları çekiyoruz
+      // Sadece AI metni olan kayıtları çek
       const url = `/api/ai-news?${qs()}`;
-      console.log("[AI] fetch:", url);
       const { ok = false, count = 0, data = [] } = await fetchJSON(url);
-      console.log("[AI] result:", { ok, count, sample: data[0] });
 
       els.meta &&
         (els.meta.textContent = ok
