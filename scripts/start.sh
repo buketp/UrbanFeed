@@ -33,10 +33,10 @@ psql "postgresql://postgres:password@127.0.0.1:5432/postgres?sslmode=disable" \
 
 # 5) Migration (migrate.js, scripts/migrate.js ya da schema.sql)
 echo "[start.sh] migration..."
-if [ -f "./migrate.js" ]; then
-  node ./migrate.js || true
-elif [ -f "./scripts/migrate.js" ]; then
+if [ -f "./scripts/migrate.js" ]; then
   node ./scripts/migrate.js || true
+elif [ -f "./migrate.js" ]; then
+  node ./migrate.js || true
 elif [ -f "./schema.sql" ]; then
   psql "postgresql://postgres:password@127.0.0.1:5432/pressdb?sslmode=disable" -f ./schema.sql || true
 else
