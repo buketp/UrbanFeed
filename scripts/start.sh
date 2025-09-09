@@ -45,4 +45,5 @@ fi
 
 # 6) Uygulama
 echo "[start.sh] starting node..."
+export PORT=5000
 exec node index.js

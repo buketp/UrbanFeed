@@ -1,6 +1,6 @@
 entrypoint = "index.js"
 
-run = "bash -lc './start.sh'"
+run = "bash scripts/start.sh"
 
 modules = ["nodejs-20", "nodejs-22"]
 hidden = [".config", "package-lock.json"]
@@ -13,13 +13,45 @@ channel = "stable-24_11"
 
 [deployment]
 #run = ["node", "index.js"]
-run = "bash -lc './start.sh'"
+run = "bash scripts/start.sh"
 deploymentTarget = "autoscale"
-ignorePorts = false
+#ignorePorts = false
+
+#[[ports]]
+#localPort = 3000
+#externalPort = 80
+
+[agent]
+expertMode = true
 
 [[ports]]
 localPort = 3000
 externalPort = 80
 
-[agent]
-expertMode = true
+[[ports]]
+localPort = 5000
+externalPort = 5000
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Local Press API"
+
+[[workflows.workflow]]
+name = "Local Press API"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "./scripts/start.sh"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"

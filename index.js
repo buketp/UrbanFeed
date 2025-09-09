@@ -8,13 +8,19 @@ import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
 import pkg from "pg";
-import crypto from "node:crypto"; // ⬅️ fingerprint için
+import crypto from "node:crypto";
 const { Pool } = pkg;
 
-dotenv.config({ override: true });
+dotenv.config();
+
+function maskDbUrl(url) {
+  if (!url) return "MISSING";
+  return url.replace(/:\/\/([^@]+)@/, "://***:***@");
+}
+console.log("[BOOT] DATABASE_URL =", maskDbUrl(process.env.DATABASE_URL));
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 const API_KEY = process.env.API_KEY;
 
 // ---------- ESM ortamında __dirname ----------
@@ -29,7 +35,7 @@ const pool = new Pool({
   connectionTimeoutMillis: 5_000,
 });
 
-// Başlangıçta test
+// Başlangıçta DB testi
 pool
   .connect()
   .then((client) => {
@@ -40,7 +46,7 @@ pool
     console.error("❌ PostgreSQL bağlantı hatası:", err.message);
   });
 
-// ---------- Helpers ----------
+/* ----------------------- Helpers ----------------------- */
 function ensureStringArray(val) {
   if (!Array.isArray(val)) return [];
   return val
@@ -59,16 +65,33 @@ function parseBooleanish(v, fallback = false) {
   if (["0", "false", "no", "off"].includes(s)) return false;
   return fallback;
 }
-// url + içerik bazlı fingerprint (deterministik)
-function makeFingerprint(url, text) {
-  const base =
-    String(url ?? "").trim() +
-    "|" +
-    String(text ?? "").trim().toLowerCase();
-  return crypto.createHash("md5").update(base).digest("hex");
+
+/* ---------- URL normalize + fingerprint (yalnız URL’e göre) ---------- */
+function normalizeUrl(raw) {
+  try {
+    const u = new URL(String(raw).trim());
+    u.hash = ""; // #... kaldır
+    const trash = [
+      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+      "gclid", "fbclid", "ref",
+    ];
+    trash.forEach((k) => u.searchParams.delete(k));
+    let s = u.toString();
+    s = s.replace(/\?$/, ""); // boş ? varsa at
+    s = s.replace(/\/$/, ""); // sondaki /'ı kaldır
+    return s.toLowerCase();
+  } catch {
+    return String(raw).trim().toLowerCase()
+      .replace(/[#?].*$/, "")
+      .replace(/\/$/, "");
+  }
+}
+function fingerprintFromUrl(rawUrl) {
+  const canonical = normalizeUrl(rawUrl);
+  return crypto.createHash("md5").update(canonical).digest("hex");
 }
 
-// Tek bir haber satırını ortak SELECT ile okuma (şimdilik kullanılmıyor ama dursun)
+/* ------------------------- Tek haber okuma (opsiyonel) ------------------------- */
 async function fetchNewsByUrl(url) {
   const q = `
     select id,
@@ -84,36 +107,118 @@ async function fetchNewsByUrl(url) {
   return r.rows[0] || null;
 }
 
-// ---------- Middleware ----------
-app.disable("x-powered-by");
-
-// Cache'i agresif kapat (eski ekran sorununu önler)
-app.disable("etag");
-app.use((req, res, next) => {
-  res.set(
-    "Cache-Control",
-    "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+/* ------------------------- Cities / Sources tabloları ------------------------- */
+async function ensureCitiesTable(pool) {
+  await pool.query(`
+    create table if not exists public.cities (
+      id serial primary key,
+      name text not null unique,
+      code smallint unique,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now()
+    );
+  `
   );
+}
+async function ensureSourcesTable(pool) {
+  await pool.query(`
+    create table if not exists public.sources (
+      id text primary key,
+      city_id integer not null references public.cities(id) on delete cascade,
+      name text not null,
+      rss_url text not null unique,
+      website_url text,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists idx_sources_city on public.sources (city_id);
+  `);
+}
+
+/* -------------------- News indexleri (fingerprint & performans) -------------------- */
+async function ensureNewsIndexes(pool) {
+  console.log("→ Ensuring news indexes...");
+
+  await pool.query(`
+    ALTER TABLE IF EXISTS public.news
+    ADD COLUMN IF NOT EXISTS fingerprint text;
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_news_fingerprint
+    ON public.news(fingerprint);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_news_time
+    ON public.news ((coalesce(published_at, created_at)));
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_news_province
+    ON public.news (province);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_news_category
+    ON public.news (category);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_news_tags
+    ON public.news USING gin (tags);
+  `);
+
+  console.log("✅ news indexes ok");
+}
+
+/* -------------------- 81 ili bir defaya mahsus seed et -------------------- */
+async function seedCitiesIfEmpty(pool) {
+  const check = await pool.query("select count(*)::int as c from public.cities");
+  if (check.rows[0].c > 0) return;
+
+  const provinces = [
+    "Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın",
+    "Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum",
+    "Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun",
+    "Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri",
+    "Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin",
+    "Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas",
+    "Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray",
+    "Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova","Karabük",
+    "Kilis","Osmaniye","Düzce"
+  ];
+  const insert = `insert into public.cities (name, code)
+                  values ($1, $2) on conflict (name) do nothing`;
+
+  for (let i = 0; i < provinces.length; i++) {
+    await pool.query(insert, [provinces[i], i + 1]);
+  }
+  console.log("✅ Seeded 81 cities");
+}
+
+/* ---------------------------- Middleware ---------------------------- */
+app.disable("x-powered-by");
+app.disable("etag"); // agresif cache kapalı
+app.use((req, res, next) => {
+  res.set("Cache-Control","no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
   res.set("Pragma", "no-cache");
   res.set("Expires", "0");
   next();
 });
-
 app.use(helmet());
 app.use(cors({ origin: "*" }));
 app.use(morgan("combined"));
 app.use(express.json({ limit: "1mb" }));
 
-// Hangi domaine cevap verdiğini görmek için log
+// Hit log
 app.use((req, _res, next) => {
   console.log("HIT:", req.method, req.url, "Host:", req.headers.host);
   next();
 });
 
 // ---------- Statik UI ----------
-app.use(
-  express.static(path.join(__dirname, "public"), { etag: false, maxAge: 0 }),
-);
+app.use(express.static(path.join(__dirname, "public"), { etag: false, maxAge: 0 }));
 
 // ---------- Health / Whoami ----------
 app.get("/health", async (_req, res) => {
@@ -124,7 +229,6 @@ app.get("/health", async (_req, res) => {
     res.status(500).json({ ok: false, db: "down", error: e.message });
   }
 });
-
 app.get("/__whoami", (req, res) => {
   res.json({
     host: req.headers.host,
@@ -134,17 +238,15 @@ app.get("/__whoami", (req, res) => {
   });
 });
 
-// ---------- API key ----------
+// ---------- API key (sadece /api/news POST’ta kullanıyoruz) ----------
 function requireApiKey(req, res, next) {
   const key = req.header("x-api-key");
-  if (!API_KEY)
-    return res.status(500).json({ error: "API_KEY tanımlı değil." });
-  if (!key || key !== API_KEY)
-    return res.status(401).json({ error: "Geçersiz API anahtarı." });
+  if (!API_KEY) return res.status(500).json({ error: "API_KEY tanımlı değil." });
+  if (!key || key !== API_KEY) return res.status(401).json({ error: "Geçersiz API anahtarı." });
   next();
 }
 
-// ---------- Şema ----------
+/* -------------------------- Şemalar -------------------------- */
 const NewsSchema = z.object({
   source: z.string().min(2),
   province: z.string().min(2),
@@ -152,29 +254,28 @@ const NewsSchema = z.object({
   url: z.string().url(),
   category: z.enum(["şikayet", "soru", "öneri", "istek"]),
   tags: z.array(z.string().min(1)).max(5).optional(),
-
-  // ⬇️ Boş string gelirse alanı yok say (optional)
   summary: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.string().min(10).optional(),
   ),
-
   publishedAt: z.string().datetime().optional(),
   tweetText: z.string().max(280).optional(),
 });
+const SourceSchema = z.object({
+  city_id: z.coerce.number().int().positive(),
+  name: z.string().min(2),
+  rss_url: z.string().url(),
+  website_url: z.string().url().optional(),
+  is_active: z.coerce.boolean().optional(),
+});
 
-// ---------- CREATE (Upsert + update, fingerprint ile) ----------
+/* -------------------------- NEWS: CREATE -------------------------- */
 app.post("/api/news", requireApiKey, async (req, res) => {
-  console.log(
-    ">>> Yeni haber isteği geldi:",
-    JSON.stringify(req.body, null, 2),
-  );
+  console.log(">>> Yeni haber isteği geldi:", JSON.stringify(req.body, null, 2));
 
   const parsed = NewsSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res
-      .status(400)
-      .json({ error: "Doğrulama hatası", details: parsed.error.flatten() });
+    return res.status(400).json({ error: "Doğrulama hatası", details: parsed.error.flatten() });
   }
 
   const d = parsed.data;
@@ -182,8 +283,9 @@ app.post("/api/news", requireApiKey, async (req, res) => {
   const tags = ensureStringArray(d.tags);
   const pubAt = toIsoOrNull(d.publishedAt);
 
-  // url + içerikten fingerprint üret (tweetText yoksa summary, o da yoksa title)
-  const fp = makeFingerprint(d.url, d.tweetText ?? d.summary ?? d.title);
+  // URL normalize + fingerprint (dup’ları durdurur)
+  const canonicalUrl = normalizeUrl(d.url);
+  const fp = fingerprintFromUrl(canonicalUrl);
 
   try {
     const insertSql = `
@@ -193,65 +295,40 @@ app.post("/api/news", requireApiKey, async (req, res) => {
         ($1, $2,         $3,     $4,      $5,   $6,  $7,       $8::text[], $9,      coalesce($10::timestamptz, now()), $11, now())
       on conflict (fingerprint) do update
       set
-        -- AI'den tweetText geldiyse güncelle
-        tweet_text = coalesce(excluded.tweet_text, news.tweet_text),
-        -- Tags geldiyse birleştir + uniq
-        tags = case
-                 when excluded.tags is not null then (
-                   select array(
-                     select distinct t from unnest(coalesce(news.tags,'{}') || coalesce(excluded.tags,'{}')) as t
-                   )
-                 )
-                 else news.tags
-               end,
-        -- Boş bırakılmayan alanları tazele (varsa)
-        category = coalesce(excluded.category, news.category),
-        source   = coalesce(excluded.source,   news.source),
-        province = coalesce(excluded.province, news.province),
-        title    = coalesce(excluded.title,    news.title),
-        summary  = coalesce(excluded.summary,  news.summary),
-        url      = coalesce(excluded.url,      news.url),
+        tweet_text   = coalesce(excluded.tweet_text, news.tweet_text),
+        tags         = case
+                         when excluded.tags is not null then (
+                           select array(select distinct t from unnest(coalesce(news.tags,'{}') || coalesce(excluded.tags,'{}')) t)
+                         ) else news.tags end,
+        category     = coalesce(excluded.category, news.category),
+        source       = coalesce(excluded.source,   news.source),
+        province     = coalesce(excluded.province, news.province),
+        title        = coalesce(excluded.title,    news.title),
+        summary      = coalesce(excluded.summary,  news.summary),
+        url          = coalesce(excluded.url,      news.url),
         published_at = coalesce(excluded.published_at, news.published_at)
       returning id, source, province, title, url, category, tags, summary,
                 published_at as "publishedAt", tweet_text as "tweetText",
                 created_at as "createdAt";
     `;
-
     const insertVals = [
-      id,
-      fp,
-      d.source,
-      d.province,
-      d.title,
-      d.url,
-      d.category,
-      tags,
-      d.summary ?? null,
-      pubAt,
-      d.tweetText ?? null,
+      id, fp, d.source, d.province, d.title, canonicalUrl,
+      d.category, tags, d.summary ?? null, pubAt, d.tweetText ?? null,
     ];
-
     const r = await pool.query(insertSql, insertVals);
     return res.status(201).json({ ok: true, data: r.rows[0] });
   } catch (e) {
     console.error("DB upsert error:", e);
-    res
-      .status(500)
-      .json({ ok: false, error: "DB upsert error", detail: e.message });
+    res.status(500).json({ ok: false, error: "DB upsert error", detail: e.message });
   }
 });
 
-// ---------- READ (liste) ----------
+/* -------------------------- NEWS: LIST -------------------------- */
 async function getNewsHandler(req, res) {
   const {
-    source,
-    province,
-    category,
-    q,
-    limit = 50,
-    offset = 0,
-    order = "desc",
-    aiOnly: aiOnlyParam, // true|false|1|0|yes|no...
+    source, province, category, q,
+    limit = 50, offset = 0, order = "desc",
+    aiOnly: aiOnlyParam,
   } = req.query;
 
   const aiOnly = parseBooleanish(aiOnlyParam, false);
@@ -259,45 +336,26 @@ async function getNewsHandler(req, res) {
   const where = [];
   const params = [];
 
-  if (source) {
-    params.push(String(source));
-    where.push(`source = $${params.length}`);
-  }
-  if (province) {
-    params.push(String(province));
-    where.push(`lower(province) = lower($${params.length})`);
-  }
-  if (category) {
-    params.push(String(category));
-    where.push(`category = $${params.length}`);
-  }
-  if (aiOnly) {
-    where.push(`tweet_text is not null and length(trim(tweet_text)) > 0`);
-  }
+  if (source)   { params.push(String(source));   where.push(`source = $${params.length}`); }
+  if (province) { params.push(String(province)); where.push(`lower(province) = lower($${params.length})`); }
+  if (category) { params.push(String(category)); where.push(`category = $${params.length}`); }
+  if (aiOnly)   { where.push(`tweet_text is not null and length(trim(tweet_text)) > 0`); }
   if (q) {
     params.push(`%${String(q).toLowerCase()}%`);
     const i = params.length;
-    // title / summary / tags / tweet_text içinde ara
     where.push(
       `(lower(title) like $${i} or lower(summary) like $${i} or lower(tweet_text) like $${i} or
         exists (select 1 from unnest(coalesce(tags, '{}')) t where lower(t) like $${i}))`,
     );
   }
 
-  // limit güvenliği
+  // limit/offset güvenliği
   const rawLimit = parseInt(limit, 10);
-  const safeLimit =
-    Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 500
-      ? rawLimit
-      : 50;
-
-  // offset güvenliği
+  const safeLimit = Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 500 ? rawLimit : 50;
   const rawOffset = parseInt(offset, 10);
-  const safeOffset =
-    Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+  const safeOffset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
 
-  params.push(safeLimit);
-  params.push(safeOffset);
+  params.push(safeLimit, safeOffset);
 
   // sıralama
   const direction = String(order).toLowerCase() === "asc" ? "asc" : "desc";
@@ -320,22 +378,20 @@ async function getNewsHandler(req, res) {
     res.json({ ok: true, aiOnly, count: r.rowCount, data: r.rows });
   } catch (e) {
     console.error("DB query error:", e);
-    res
-      .status(500)
-      .json({ ok: false, error: "DB query error", detail: e.message });
+    res.status(500).json({ ok: false, error: "DB query error", detail: e.message });
   }
 }
 
 // Ör: /api/news?source=ai&province=Sivas&category=öneri&q=finans&aiOnly=true&limit=50&offset=0&order=desc
 app.get("/api/news", getNewsHandler);
 
-// ---------- SADECE AI içerenler (kısa yol/proxy) ----------
+// Sadece AI içerenler (kısa yol)
 app.get("/api/ai-news", (req, res) => {
-  req.query.aiOnly = "true"; // zorunlu AI-only
+  req.query.aiOnly = "true";
   return getNewsHandler(req, res);
 });
 
-// ---------- Ek debug endpointler ----------
+// Ek debug
 app.get("/api/news/count", async (_req, res) => {
   try {
     const r = await pool.query("select count(*) from news");
@@ -344,7 +400,6 @@ app.get("/api/news/count", async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-
 app.get("/api/news/last", async (_req, res) => {
   try {
     const r = await pool.query(`
@@ -359,32 +414,135 @@ app.get("/api/news/last", async (_req, res) => {
   }
 });
 
-// ---------- DELETE ALL ----------
+// Tüm haberleri sil (geliştirme amaçlı)
 app.delete("/api/news", requireApiKey, async (_req, res) => {
   try {
     await pool.query("truncate table news restart identity;");
     res.json({ ok: true, message: "Tüm haberler silindi." });
   } catch (e) {
     console.error("DB truncate error:", e);
-    res
-      .status(500)
-      .json({ ok: false, error: "DB truncate error", detail: e.message });
+    res.status(500).json({ ok: false, error: "DB truncate error", detail: e.message });
   }
 });
 
-// ---------- Admin route ----------
+/* -------------------- Cities & Sources API -------------------- */
+app.get("/api/cities", async (req, res) => {
+  try {
+    const { flat } = req.query;
+    const r = await pool.query(
+      "select id, name, code from public.cities where is_active = true order by name asc",
+    );
+    if (flat === "1" || flat === "true") {
+      return res.json(r.rows);
+    }
+    return res.json({ ok: true, data: r.rows });
+  } catch (e) {
+    console.error("cities error:", e);
+    res.status(500).json({ ok: false, error: "cities_failed", detail: e.message });
+  }
+});
+app.get("/api/sources", async (req, res) => {
+  try {
+    const { city_id, is_active } = req.query;
+    const clauses = [];
+    const vals = [];
+    if (city_id) {
+      clauses.push(`city_id = $${vals.push(Number(city_id))}`);
+    }
+    if (is_active !== undefined) {
+      clauses.push(`is_active = $${vals.push(parseBooleanish(is_active, true))}`);
+    } else {
+      clauses.push(`is_active = true`);
+    }
+    const sql = `
+      select id, city_id, name, rss_url, website_url, is_active, created_at
+        from public.sources
+       ${clauses.length ? "where " + clauses.join(" and ") : ""}
+       order by created_at desc
+    `;
+    const r = await pool.query(sql, vals);
+    res.json({ ok: true, count: r.rowCount, data: r.rows });
+  } catch (e) {
+    console.error("sources list error:", e);
+    res.status(500).json({ ok: false, error: "sources_list_failed", detail: e.message });
+  }
+});
+app.post("/api/sources", async (req, res) => {
+  try {
+    const p = SourceSchema.safeParse(req.body);
+    if (!p.success) {
+      return res.status(400).json({ ok: false, error: "validation_error", details: p.error.flatten() });
+    }
+    const d = p.data;
+
+    // Şehir adı webhook için
+    const cityQ = await pool.query("select name from public.cities where id = $1", [d.city_id]);
+    const cityName = cityQ.rows[0]?.name || null;
+
+    const id = crypto.randomUUID();
+    const upsert = `
+      insert into public.sources (id, city_id, name, rss_url, website_url, is_active)
+      values ($1,$2,$3,$4,$5, coalesce($6, true))
+      on conflict (rss_url) do update
+      set name = excluded.name,
+          website_url = excluded.website_url,
+          is_active = true
+      returning id, city_id, name, rss_url, website_url, is_active, created_at
+    `;
+    const vals = [id, d.city_id, d.name, d.rss_url, d.website_url ?? null, d.is_active ?? true];
+    const r = await pool.query(upsert, vals);
+    const sourceRow = r.rows[0];
+
+    // n8n webhook (varsa)
+    const hook = process.env.N8N_SOURCE_ADDED_WEBHOOK;
+    if (hook) {
+      (async () => {
+        try {
+          await fetch(hook, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              event: "source_added",
+              source: { ...sourceRow, city_name: cityName }
+            })
+          });
+          console.log("→ n8n webhook: source_added gönderildi");
+        } catch (err) {
+          console.error("n8n webhook err:", err.message);
+        }
+      })();
+    }
+
+    res.status(201).json({ ok: true, source: { ...sourceRow, city_name: cityName } });
+  } catch (e) {
+    console.error("sources add error:", e);
+    res.status(500).json({ ok: false, error: "sources_add_failed", detail: e.message });
+  }
+});
+
+/* ---------------------------- Admin route ---------------------------- */
 app.get("/admin", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
-// ---------- SPA fallback (API dışı GET istekleri index.html'e düşsün) ----------
+// ---------- SPA fallback ----------
 app.get(/^\/(?!api)(?!__whoami)(?!health)(?!admin).*/, (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ---------- Server ----------
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(
-    `Local Press API running on http://0.0.0.0:${PORT} (PORT=${PORT})`,
-  );
-});
+/* ------------------------------ Server ------------------------------ */
+(async function bootstrap() {
+  try {
+    await ensureCitiesTable(pool);
+    await ensureSourcesTable(pool);
+    await seedCitiesIfEmpty(pool);
+    await ensureNewsIndexes(pool);
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Local Press API running on http://0.0.0.0:${PORT} (PORT=${PORT})`);
+    });
+  } catch (err) {
+    console.error("Bootstrap error:", err);
+    process.exit(1);
+  }
+})();

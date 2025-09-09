@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="tr">
 <head>
@@ -16,9 +15,8 @@
       margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
       background:var(--bg); color:var(--text);
     }
-    .container{max-width:960px; margin:32px auto; padding:0 16px}
-    
-    /* Login Styles */
+
+    /* ---------- Login Styles ---------- */
     .login-form{
       max-width:400px; margin:100px auto; padding:32px; background:var(--card);
       border:1px solid var(--b); border-radius:var(--radius); box-shadow:var(--shadow);
@@ -39,13 +37,34 @@
     .error{color:var(--danger); margin-top:8px; font-size:14px}
     .hidden{display:none}
     .loading{opacity:.6; pointer-events:none}
-    
-    /* Main App Styles */
+
+    /* ---------- App Layout (Sidebar + Main) ---------- */
+    .app-shell{display:flex; min-height:100vh;}
+
+    .sidebar{
+      width:240px; background:#101728; color:#fff; padding:24px 16px;
+      position:sticky; top:0; height:100vh; display:flex; flex-direction:column; gap:16px;
+      border-right:1px solid rgba(255,255,255,.08);
+    }
+    .brand{font-weight:800; letter-spacing:.2px; font-size:18px}
+    .nav-item{
+      display:block; padding:10px 12px; margin-bottom:6px; border-radius:10px;
+      text-decoration:none; color:#dbe3ff; transition:background .15s ease,color .15s ease;
+    }
+    .nav-item:hover{background:rgba(255,255,255,.08); color:#fff}
+    .nav-item.active{background:#1f2a44; color:#fff}
+    .logout-side{
+      margin-top:auto; width:100%; padding:10px 12px; border:0; border-radius:10px;
+      background:#E24A4A; color:#fff; font-weight:600; cursor:pointer;
+    }
+
+    .main{flex:1; padding:24px;}
+    .container{max-width:960px; margin:0 auto;}
+
+    /* ---------- Main App Content Styles ---------- */
     header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px}
     h1{margin:0; font-size:28px; letter-spacing:.2px}
-    .controls{
-      display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:center
-    }
+    .controls{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:center}
     .chip{
       border:1px solid var(--b); background:var(--pill); padding:8px 12px; border-radius:999px;
       font-size:14px; cursor:pointer; user-select:none
@@ -74,10 +93,21 @@
     .cat.soru{background:#eaf5ff; border:1px solid #cfe7ff}
     .cat.istek{background:#e8ffe8; border:1px solid #c7f3c7}
     .cat.öneri{background:#fff5e0; border:1px solid #ffe0a8}
-    
+
     .logout-btn{
       background:var(--danger); color:#fff; border:0; padding:8px 16px; border-radius:8px;
       cursor:pointer; font-size:14px; margin-left:16px;
+    }
+
+    /* ---------- Responsive: sidebar üst bara dönüşsün ---------- */
+    @media (max-width: 900px){
+      .app-shell{display:block;}
+      .sidebar{
+        position:relative; height:auto; width:100%; flex-direction:row; align-items:center; gap:12px;
+        border-right:0; border-bottom:1px solid rgba(0,0,0,.06);
+      }
+      .sidebar nav{display:flex; gap:8px}
+      .logout-side{width:auto}
     }
   </style>
 </head>
@@ -99,41 +129,76 @@
     </form>
   </div>
 
-  <!-- Main App -->
-  <div id="mainApp" class="container hidden">
-    <header>
-      <h1>Yerel Haberler</h1>
-      <button id="logoutBtn" class="logout-btn">Çıkış</button>
-    </header>
+  <!-- Main App (Sidebar + Content) -->
+  <div id="mainApp" class="hidden">
+    <div class="app-shell">
+      <!-- SOL MENÜ -->
+      <aside class="sidebar">
+        <div class="brand">Yerel Basın</div>
+        <nav>
+          <a href="/" class="nav-item" data-match="/">📄 Haberler</a>
+          <a href="/admin" class="nav-item" data-match="/admin">🛠️ Kaynak Yönetimi</a>
+          <!-- İleride: <a href="/raporlar" class="nav-item" data-match="/raporlar">📊 Raporlar</a> -->
+        </nav>
+        <button id="logoutBtn" class="logout-btn">Çıkış</button>
+      </aside>
 
-    <div class="controls">
-      <div class="field">
-        <label for="province">İl:</label>
-        <input id="province" type="text" value="Sivas" />
-      </div>
+      <!-- ANA İÇERİK -->
+      <main class="main">
+        <div class="container">
+          <header>
+            <h1>Yerel Haberler</h1>
+            
+          </header>
 
-      <div class="field" style="flex:1 1 auto">
-        <input id="search" type="text" placeholder="Başlık/özet/etiket ara..." style="width:100%" />
-      </div>
+          <div class="controls">
+            <div class="field">
+              <label for="province">İl:</label>
+              <input id="province" type="text" value="Sivas" />
+            </div>
 
-      <button id="btn-refresh" class="refresh">Yenile</button>
+            <div class="field" style="flex:1 1 auto">
+              <input id="search" type="text" placeholder="Başlık/özet/etiket ara..." style="width:100%" />
+            </div>
+
+            <button id="btn-refresh" class="refresh">Yenile</button>
+          </div>
+
+          <div class="controls" id="chips">
+            <span class="chip active" data-cat="all">Hepsi</span>
+            <span class="chip" data-cat="şikayet">Şikayet</span>
+            <span class="chip" data-cat="öneri">Öneri</span>
+            <span class="chip" data-cat="soru">Soru</span>
+            <span class="chip" data-cat="istek">İstek</span>
+          </div>
+
+          <div id="meta">Toplam haber: —</div>
+
+          <!-- liste alanı -->
+          <div id="list"></div>
+        </div>
+      </main>
     </div>
-
-    <div class="controls" id="chips">
-      <span class="chip active" data-cat="all">Hepsi</span>
-      <span class="chip" data-cat="şikayet">Şikayet</span>
-      <span class="chip" data-cat="öneri">Öneri</span>
-      <span class="chip" data-cat="soru">Soru</span>
-      <span class="chip" data-cat="istek">İstek</span>
-    </div>
-
-    <div id="meta">Toplam haber: —</div>
-
-    <!-- liste alanı -->
-    <div id="list"></div>
   </div>
 
   <!-- Uygulama JS'i -->
   <script src="app.js" defer></script>
+
+  <!-- Küçük yardımcı JS: aktif menü ve çıkış düğmesi -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Aktif menü işaretleme
+      const path = location.pathname.replace(/\/+$/, '') || '/';
+      document.querySelectorAll('.nav-item').forEach(a => {
+        const match = (a.dataset.match || a.getAttribute('href')).replace(/\/+$/, '') || '/';
+        if (match === path) a.classList.add('active');
+      });
+
+      // Sol menüdeki çıkış, üstteki çıkışı da tetiklesin
+      const sideBtn = document.getElementById('logoutSideBtn');
+      const headerBtn = document.getElementById('logoutBtn');
+      sideBtn?.addEventListener('click', () => headerBtn?.click());
+    });
+  </script>
 </body>
 </html>

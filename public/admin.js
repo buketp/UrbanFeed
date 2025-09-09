@@ -1,228 +1,135 @@
+// public/admin.js
 
-(() => {
-  // Basit kimlik doğrulama (gerçek projede güvenli olmalı)
-  const ADMIN_CREDENTIALS = {
-    username: "admin",
-    password: "admin123"
-  };
+// API_KEY localStorage'da tutuluyorsa al (POST'larda kullanıyoruz)
+const API_KEY = localStorage.getItem("API_KEY") || "";
 
-  let currentPage = 1;
-  const itemsPerPage = 20;
-  let totalItems = 0;
+// Mesaj kutuları (admin.html'de var)
+const okEl  = document.getElementById("ok");
+const errEl = document.getElementById("err");
+function show(el, text){
+  if (!el) return;
+  el.textContent = text;
+  el.style.display = "block";
+  setTimeout(()=>{ el.style.display = "none"; }, 3000);
+}
+function okMsg(t){ show(okEl, t); }
+function errMsg(t){ show(errEl, t); }
 
-  // DOM elements
-  const loginSection = document.getElementById("loginSection");
-  const adminSection = document.getElementById("adminSection");
-  const loginForm = document.getElementById("loginForm");
-  const loginError = document.getElementById("loginError");
-  const logoutBtn = document.getElementById("logoutBtn");
-  const welcomeText = document.getElementById("welcomeText");
-  const newsTableBody = document.getElementById("newsTableBody");
-  const totalNewsEl = document.getElementById("totalNews");
-  const aiNewsEl = document.getElementById("aiNews");
-  const todayNewsEl = document.getElementById("todayNews");
-  const prevBtn = document.getElementById("prevBtn");
-  const nextBtn = document.getElementById("nextBtn");
-  const pageInfo = document.getElementById("pageInfo");
-  const clearAllBtn = document.getElementById("clearAllBtn");
+// Şehir listesini doldurur ve bittiğinde kaynak listesini çeker
+async function loadCities() {
+  try {
+    const res = await fetch("/api/cities?flat=1");
+    const cities = await res.json();
 
-  // Check if already logged in
-  if (sessionStorage.getItem("adminLoggedIn") === "true") {
-    showAdminPanel();
+    const sel = document.getElementById("provinceSelect");
+    sel.innerHTML = '<option value="">Şehir seç…</option>';
+
+    cities.forEach((c) => {
+      const o = document.createElement("option");
+      o.value = c.id;      // city_id
+      o.textContent = c.name;
+      sel.appendChild(o);
+    });
+
+    // İlk şehir otomatik seçilsin istersen:
+    if (!sel.value && cities[0]) sel.value = cities[0].id;
+
+    // Şehirler yüklendikten sonra listeyi getir
+    await loadSources();
+  } catch (err) {
+    console.error("Şehirler yüklenemedi:", err);
+    errMsg("Şehir listesi yüklenemedi.");
   }
+}
 
-  // Login form handler
-  loginForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const username = document.getElementById("username").value.trim();
-    const password = document.getElementById("password").value;
+// Seçilen şehre göre kaynakları listeler
+async function loadSources() {
+  const tableBody = document.getElementById("sourcesTableBody");
+  if (!tableBody) return;
 
-    if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-      sessionStorage.setItem("adminLoggedIn", "true");
-      loginError.classList.add("hidden");
-      showAdminPanel();
-    } else {
-      loginError.textContent = "Kullanıcı adı veya şifre hatalı!";
-      loginError.classList.remove("hidden");
+  tableBody.innerHTML = "<tr><td colspan='5'>Yükleniyor...</td></tr>";
+
+  try {
+    const cityId = document.getElementById("provinceSelect").value;
+    const url = cityId ? `/api/sources?city_id=${encodeURIComponent(cityId)}` : "/api/sources";
+    const res = await fetch(url);
+    const json = await res.json();
+    const data = json.data || [];
+
+    if (data.length === 0) {
+      tableBody.innerHTML = "<tr><td colspan='5' class='muted'>Bu şehir için kaynak yok.</td></tr>";
+      return;
     }
-  });
 
-  // Logout handler
-  logoutBtn.addEventListener("click", () => {
-    sessionStorage.removeItem("adminLoggedIn");
-    adminSection.classList.add("hidden");
-    loginSection.classList.remove("hidden");
-    loginForm.reset();
-  });
-
-  // Clear all news handler
-  clearAllBtn.addEventListener("click", async () => {
-    if (!confirm("Tüm haberleri silmek istediğinizden emin misiniz?")) return;
-
-    try {
-      const response = await fetch("/api/news", {
-        method: "DELETE",
-        headers: {
-          "x-api-key": "SENIN_API_KEYIN" // Aynı API key
-        }
-      });
-
-      if (response.ok) {
-        alert("Tüm haberler başarıyla silindi!");
-        loadStats();
-        loadNews();
-      } else {
-        alert("Haber silme işlemi başarısız!");
-      }
-    } catch (error) {
-      console.error("Clear all error:", error);
-      alert("Bir hata oluştu!");
-    }
-  });
-
-  // Pagination handlers
-  prevBtn.addEventListener("click", () => {
-    if (currentPage > 1) {
-      currentPage--;
-      loadNews();
-    }
-  });
-
-  nextBtn.addEventListener("click", () => {
-    if (currentPage * itemsPerPage < totalItems) {
-      currentPage++;
-      loadNews();
-    }
-  });
-
-  function showAdminPanel() {
-    loginSection.classList.add("hidden");
-    adminSection.classList.remove("hidden");
-    welcomeText.textContent = `Hoşgeldiniz, ${ADMIN_CREDENTIALS.username}`;
-    loadStats();
-    loadNews();
-  }
-
-  async function loadStats() {
-    try {
-      // Total news count
-      const totalResponse = await fetch("/api/news/count");
-      const totalData = await totalResponse.json();
-      totalNewsEl.textContent = totalData.ok ? totalData.count : "0";
-
-      // AI processed news
-      const aiResponse = await fetch("/api/ai-news?limit=1000");
-      const aiData = await aiResponse.json();
-      aiNewsEl.textContent = aiData.ok ? aiData.count : "0";
-
-      // Today's news
-      const today = new Date().toISOString().split('T')[0];
-      const todayResponse = await fetch(`/api/news?limit=1000&order=desc`);
-      const todayData = await todayResponse.json();
-      
-      if (todayData.ok && Array.isArray(todayData.data)) {
-        const todayCount = todayData.data.filter(item => {
-          const itemDate = new Date(item.createdAt || item.publishedAt).toISOString().split('T')[0];
-          return itemDate === today;
-        }).length;
-        todayNewsEl.textContent = todayCount;
-      } else {
-        todayNewsEl.textContent = "0";
-      }
-
-    } catch (error) {
-      console.error("Stats loading error:", error);
-      totalNewsEl.textContent = "Hata";
-      aiNewsEl.textContent = "Hata";
-      todayNewsEl.textContent = "Hata";
-    }
-  }
-
-  async function loadNews() {
-    try {
-      document.body.classList.add("loading");
-      
-      const offset = (currentPage - 1) * itemsPerPage;
-      const response = await fetch(`/api/news?limit=${itemsPerPage}&offset=${offset}&order=desc`);
-      const data = await response.json();
-
-      if (data.ok && Array.isArray(data.data)) {
-        totalItems = data.count || 0;
-        renderNewsTable(data.data);
-        updatePagination();
-      } else {
-        newsTableBody.innerHTML = "<tr><td colspan='6'>Haber bulunamadı</td></tr>";
-      }
-
-    } catch (error) {
-      console.error("News loading error:", error);
-      newsTableBody.innerHTML = "<tr><td colspan='6'>Hata oluştu</td></tr>";
-    } finally {
-      document.body.classList.remove("loading");
-    }
-  }
-
-  function renderNewsTable(news) {
-    newsTableBody.innerHTML = news.map(item => {
-      const publishedAt = item.publishedAt || item.createdAt;
-      const date = publishedAt ? new Date(publishedAt).toLocaleString("tr-TR") : "Bilinmiyor";
-      
-      return `
-        <tr>
-          <td>
-            <a href="${escapeHtml(item.url)}" target="_blank" style="color:#0b57d0; text-decoration:none">
-              ${escapeHtml(item.title || "Başlık yok")}
-            </a>
-          </td>
-          <td>${escapeHtml(item.province || "-")}</td>
-          <td>
-            <span style="background:var(--pill); padding:2px 6px; border-radius:12px; font-size:12px">
-              ${escapeHtml(item.category || "-")}
-            </span>
-          </td>
-          <td>${escapeHtml(item.source || "-")}</td>
-          <td style="font-size:12px">${date}</td>
-          <td>
-            <button onclick="deleteNews('${item.id}')" class="btn btn-danger" style="padding:4px 8px; font-size:12px">
-              Sil
-            </button>
-          </td>
-        </tr>
+    tableBody.innerHTML = "";
+    data.forEach((s) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${s.name}</td>
+        <td><a href="${s.rss_url}" target="_blank" rel="noreferrer">${s.rss_url}</a></td>
+        <td>${s.website_url ? `<a href="${s.website_url}" target="_blank" rel="noreferrer">${s.website_url}</a>` : '-'}</td>
+        <td>${s.is_active ? "✅" : "❌"}</td>
+        <td>${new Date(s.created_at).toLocaleString("tr-TR")}</td>
       `;
-    }).join("");
+      tableBody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error("Kaynaklar yüklenemedi:", err);
+    tableBody.innerHTML = "<tr><td colspan='5'>Hata oluştu</td></tr>";
+  }
+}
+
+// Yeni kaynak ekler
+async function addSource(e) {
+  e.preventDefault();
+
+  const city_id = Number(document.getElementById("provinceSelect").value);
+  const name     = document.getElementById("sourceName").value.trim();
+  const rss_url  = document.getElementById("rssUrl").value.trim();
+  const website  = document.getElementById("siteUrl").value.trim();
+
+  if (!city_id || !name || !rss_url) {
+    errMsg("Şehir, ad ve RSS URL zorunlu.");
+    return;
   }
 
-  function updatePagination() {
-    const totalPages = Math.ceil(totalItems / itemsPerPage);
-    
-    prevBtn.disabled = currentPage <= 1;
-    nextBtn.disabled = currentPage >= totalPages;
-    
-    pageInfo.textContent = `Sayfa ${currentPage} / ${totalPages} (${totalItems} kayıt)`;
+  const addBtn = document.getElementById("addBtn");
+  if (addBtn) addBtn.disabled = true;
+
+  const body = { city_id, name, rss_url };
+  if (website) body.website_url = website;
+
+  try {
+    const res = await fetch("/api/sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || "Kaynak eklenemedi.");
+
+    okMsg("Kaynak eklendi.");
+    // Formu temizle ama şehir seçimini koru
+    const form = document.getElementById("sourceForm");
+    form && form.reset();
+    document.getElementById("provinceSelect").value = String(city_id);
+
+    await loadSources();
+  } catch (err) {
+    console.error("Kaynak eklenemedi:", err);
+    errMsg(err.message || "Kaynak eklenemedi.");
+  } finally {
+    if (addBtn) addBtn.disabled = false;
   }
+}
 
-  // Global function for delete button
-  window.deleteNews = async function(newsId) {
-    if (!confirm("Bu haberi silmek istediğinizden emin misiniz?")) return;
+// Sayfa yüklenince başlat ve event'leri bağla
+document.addEventListener("DOMContentLoaded", () => {
+  loadCities(); // bitince loadSources() zaten çağrılıyor
 
-    try {
-      // Note: Bu endpoint mevcut değil, sadece UI için placeholder
-      // Gerçek implementation için backend'e DELETE /api/news/:id endpoint'i eklenebilir
-      console.log("Delete news with ID:", newsId);
-      alert("Silme özelliği henüz implement edilmedi. Console'da ID görülebilir.");
-      
-      // Şimdilik listeyi yenile
-      loadStats();
-      loadNews();
-    } catch (error) {
-      console.error("Delete error:", error);
-      alert("Silme işlemi başarısız!");
-    }
-  };
+  const form = document.getElementById("sourceForm");
+  if (form) form.addEventListener("submit", addSource);
 
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-})();
+  const sel = document.getElementById("provinceSelect");
+  if (sel) sel.addEventListener("change", loadSources);
+});

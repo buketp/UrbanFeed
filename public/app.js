@@ -3,7 +3,7 @@
   // ====== Login Sistemi ======
   const LOGIN_CREDENTIALS = {
     username: "admin",
-    password: "admin123"
+    password: "admin"
   };
 
   // ====== Ayarlar / API anahtarı (opsiyonel) ======
@@ -181,9 +181,7 @@
     return `
       <div class="card">
         <div style="margin-bottom:6px">
-          <a class="title" href="${ESC(it.url)}" target="_blank" rel="noopener noreferrer">
-            ${ESC(it.title) || "(başlık yok)"}
-          </a>
+          
         </div>
         ${it.tweetText ? `<div class="summary">${ESC(it.tweetText)}</div>` : ''}
         <div class="sub">
@@ -210,7 +208,7 @@
           : "Toplam haber: —");
 
       if (!ok || !Array.isArray(data) || data.length === 0) {
-        els.list && (els.list.innerHTML = `<div class="card">AI mesajlı kayıt bulunamadı.</div>`);
+        els.list && (els.list.innerHTML = `<div class="card">Kayıt bulunamadı.</div>`);
         return;
       }
 
