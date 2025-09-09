@@ -21,24 +21,19 @@ args = "Local Press API"
 
 [[workflows.workflow]]
 name = "Local Press API"
-mode = "sequential"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "./scripts/start.sh"
-waitForPort = 5000
+waitForPort = 3000
 
 [workflows.workflow.metadata]
-outputType = "webview"
+outputType = "console"
 
 [agent]
 expertMode = true
 
 [[ports]]
 localPort = 3000
-externalPort = 80
-
-[[ports]]
-localPort = 5000
-externalPort = 5000
+externalPort = 3000
