@@ -6,7 +6,6 @@ channel = "stable-24_11"
 modules = ["nodejs-22"]
 hidden = [".config", "package-lock.json"]
 
-# Run butonunda sadece workflow çalışsın
 [workflows]
 runButton = "Project"
 
@@ -22,6 +21,7 @@ args = "Local Press API"
 [[workflows.workflow]]
 name = "Local Press API"
 author = "agent"
+mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
