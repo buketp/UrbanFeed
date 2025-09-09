@@ -1,7 +1,12 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 echo "[start.sh] starting..."
+
+# Ensure .pgdata directory ownership
+if [ -d ".pgdata" ]; then
+  chown -R $(whoami):$(whoami) .pgdata
+fi
 
 PGDATA="$HOME/pgdata"
 PGLOG="$HOME/pg.log"

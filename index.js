@@ -29,10 +29,11 @@ const __dirname = path.dirname(__filename);
 
 // ---------- PostgreSQL Pool ----------
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL || "postgresql://postgres:password@127.0.0.1:5432/pressdb?sslmode=disable",
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
 // Başlangıçta DB testi
