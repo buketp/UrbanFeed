@@ -29,10 +29,13 @@ const __dirname = path.dirname(__filename);
 
 // ---------- PostgreSQL Pool ----------
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://postgres:password@127.0.0.1:5432/pressdb?sslmode=disable",
+  connectionString:
+    process.env.DATABASE_URL ||
+    "postgresql://postgres:password@127.0.0.1:5432/pressdb?sslmode=disable",
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
+  // prod DB'lerde genelde SSL gerekir, lokalde kapalı
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
@@ -73,8 +76,14 @@ function normalizeUrl(raw) {
     const u = new URL(String(raw).trim());
     u.hash = ""; // #... kaldır
     const trash = [
-      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-      "gclid", "fbclid", "ref",
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_term",
+      "utm_content",
+      "gclid",
+      "fbclid",
+      "ref",
     ];
     trash.forEach((k) => u.searchParams.delete(k));
     let s = u.toString();
@@ -82,9 +91,7 @@ function normalizeUrl(raw) {
     s = s.replace(/\/$/, ""); // sondaki /'ı kaldır
     return s.toLowerCase();
   } catch {
-    return String(raw).trim().toLowerCase()
-      .replace(/[#?].*$/, "")
-      .replace(/\/$/, "");
+    return String(raw).trim().toLowerCase().replace(/[#?].*$/, "").replace(/\/$/, "");
   }
 }
 function fingerprintFromUrl(rawUrl) {
@@ -118,8 +125,7 @@ async function ensureCitiesTable(pool) {
       is_active boolean not null default true,
       created_at timestamptz not null default now()
     );
-  `
-  );
+  `);
 }
 async function ensureSourcesTable(pool) {
   await pool.query(`
@@ -136,38 +142,54 @@ async function ensureSourcesTable(pool) {
   `);
 }
 
-/* -------------------- News indexleri (fingerprint & performans) -------------------- */
+/* -------------------- News sütun + index (fingerprint & ilişkiler) -------------------- */
 async function ensureNewsIndexes(pool) {
   console.log("→ Ensuring news indexes...");
 
+  // Gerekli sütunlar
   await pool.query(`
     ALTER TABLE IF EXISTS public.news
-    ADD COLUMN IF NOT EXISTS fingerprint text;
+      ADD COLUMN IF NOT EXISTS fingerprint text;
+  `);
+  await pool.query(`
+    ALTER TABLE IF EXISTS public.news
+      ADD COLUMN IF NOT EXISTS city_id integer;
+  `);
+  await pool.query(`
+    ALTER TABLE IF EXISTS public.news
+      ADD COLUMN IF NOT EXISTS source_id text;
   `);
 
+  // Benzersizlik (dup engelleme)
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_news_fingerprint
     ON public.news(fingerprint);
   `);
 
+  // Performans index'leri
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_news_time
     ON public.news ((coalesce(published_at, created_at)));
   `);
-
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_news_province
     ON public.news (province);
   `);
-
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_news_category
     ON public.news (category);
   `);
-
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_news_tags
     ON public.news USING gin (tags);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_news_city
+    ON public.news (city_id);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_news_source_id
+    ON public.news (source_id);
   `);
 
   console.log("✅ news indexes ok");
@@ -196,6 +218,50 @@ async function seedCitiesIfEmpty(pool) {
     await pool.query(insert, [provinces[i], i + 1]);
   }
   console.log("✅ Seeded 81 cities");
+}
+
+/* ---------------------------- ID çözümleyen yardımcılar ---------------------------- */
+async function findCityIdByName(name) {
+  if (!name) return null;
+  const r = await pool.query(
+    "select id from public.cities where lower(name)=lower($1) limit 1",
+    [String(name)]
+  );
+  return r.rows[0]?.id ?? null;
+}
+
+async function resolveSourceId({ source_id, rss_url, name, city_id }) {
+  // 1) Doğrudan source_id verilmişse
+  if (source_id) return source_id;
+
+  // 2) rss_url üzerinden eşle
+  if (rss_url) {
+    const r = await pool.query(
+      "select id from public.sources where rss_url=$1 limit 1",
+      [rss_url]
+    );
+    if (r.rows[0]?.id) return r.rows[0].id;
+  }
+
+  // 3) name + city_id (daha güçlü eşleşme)
+  if (name && city_id) {
+    const r = await pool.query(
+      "select id from public.sources where name=$1 and city_id=$2 limit 1",
+      [name, city_id]
+    );
+    if (r.rows[0]?.id) return r.rows[0].id;
+  }
+
+  // 4) sadece name (en zayıf)
+  if (name) {
+    const r = await pool.query(
+      "select id from public.sources where name=$1 limit 1",
+      [name]
+    );
+    if (r.rows[0]?.id) return r.rows[0].id;
+  }
+
+  return null;
 }
 
 /* ---------------------------- Middleware ---------------------------- */
@@ -261,7 +327,13 @@ const NewsSchema = z.object({
   ),
   publishedAt: z.string().datetime().optional(),
   tweetText: z.string().max(280).optional(),
+
+  // Yeni alanlar (opsiyonel; varsa bağlarız)
+  city_id: z.coerce.number().int().positive().optional(),
+  source_id: z.string().uuid().optional(),
+  rss_url: z.string().url().optional(),
 });
+
 const SourceSchema = z.object({
   city_id: z.coerce.number().int().positive(),
   name: z.string().min(2),
@@ -288,33 +360,53 @@ app.post("/api/news", requireApiKey, async (req, res) => {
   const canonicalUrl = normalizeUrl(d.url);
   const fp = fingerprintFromUrl(canonicalUrl);
 
+  // city_id / source_id çöz
+  const cityId = d.city_id ?? (await findCityIdByName(d.province));
+  const srcId = await resolveSourceId({
+    source_id: d.source_id,
+    rss_url: d.rss_url,
+    name: d.source,
+    city_id: cityId ?? null,
+  });
+
   try {
     const insertSql = `
       insert into news
-        (id, fingerprint, source, province, title, url, category, tags, summary, published_at, tweet_text, created_at)
+        (id, fingerprint, source, province, title, url, category, tags, summary,
+         published_at, tweet_text, created_at, city_id, source_id)
       values
-        ($1, $2,         $3,     $4,      $5,   $6,  $7,       $8::text[], $9,      coalesce($10::timestamptz, now()), $11, now())
+        ($1, $2,         $3,     $4,      $5,   $6,  $7,       $8::text[], $9,
+         coalesce($10::timestamptz, now()), $11, now(), $12, $13)
       on conflict (fingerprint) do update
       set
         tweet_text   = coalesce(excluded.tweet_text, news.tweet_text),
         tags         = case
                          when excluded.tags is not null then (
-                           select array(select distinct t from unnest(coalesce(news.tags,'{}') || coalesce(excluded.tags,'{}')) t)
-                         ) else news.tags end,
+                           select array(
+                             select distinct t
+                             from unnest(coalesce(news.tags,'{}') || coalesce(excluded.tags,'{}')) t
+                           )
+                         )
+                         else news.tags
+                       end,
         category     = coalesce(excluded.category, news.category),
         source       = coalesce(excluded.source,   news.source),
         province     = coalesce(excluded.province, news.province),
         title        = coalesce(excluded.title,    news.title),
         summary      = coalesce(excluded.summary,  news.summary),
         url          = coalesce(excluded.url,      news.url),
-        published_at = coalesce(excluded.published_at, news.published_at)
+        published_at = coalesce(excluded.published_at, news.published_at),
+        city_id      = coalesce(excluded.city_id,  news.city_id),
+        source_id    = coalesce(excluded.source_id,news.source_id)
       returning id, source, province, title, url, category, tags, summary,
                 published_at as "publishedAt", tweet_text as "tweetText",
-                created_at as "createdAt";
+                created_at as "createdAt",
+                city_id as "cityId", source_id as "sourceId";
     `;
     const insertVals = [
       id, fp, d.source, d.province, d.title, canonicalUrl,
       d.category, tags, d.summary ?? null, pubAt, d.tweetText ?? null,
+      cityId ?? null, srcId ?? null,
     ];
     const r = await pool.query(insertSql, insertVals);
     return res.status(201).json({ ok: true, data: r.rows[0] });
@@ -330,6 +422,7 @@ async function getNewsHandler(req, res) {
     source, province, category, q,
     limit = 50, offset = 0, order = "desc",
     aiOnly: aiOnlyParam,
+    city_id, source_id,
   } = req.query;
 
   const aiOnly = parseBooleanish(aiOnlyParam, false);
@@ -340,6 +433,8 @@ async function getNewsHandler(req, res) {
   if (source)   { params.push(String(source));   where.push(`source = $${params.length}`); }
   if (province) { params.push(String(province)); where.push(`lower(province) = lower($${params.length})`); }
   if (category) { params.push(String(category)); where.push(`category = $${params.length}`); }
+  if (city_id)  { params.push(Number(city_id));  where.push(`city_id = $${params.length}`); }
+  if (source_id){ params.push(String(source_id));where.push(`source_id = $${params.length}`); }
   if (aiOnly)   { where.push(`tweet_text is not null and length(trim(tweet_text)) > 0`); }
   if (q) {
     params.push(`%${String(q).toLowerCase()}%`);
@@ -358,7 +453,6 @@ async function getNewsHandler(req, res) {
 
   params.push(safeLimit, safeOffset);
 
-  // sıralama
   const direction = String(order).toLowerCase() === "asc" ? "asc" : "desc";
 
   const sql = `
@@ -366,7 +460,9 @@ async function getNewsHandler(req, res) {
            created_at   as "createdAt",
            source, province, title, url, category, tags, summary,
            published_at as "publishedAt",
-           tweet_text   as "tweetText"
+           tweet_text   as "tweetText",
+           city_id      as "cityId",
+           source_id    as "sourceId"
       from news
      ${where.length ? "where " + where.join(" and ") : ""}
      order by coalesce(published_at, created_at) ${direction}
@@ -383,7 +479,6 @@ async function getNewsHandler(req, res) {
   }
 }
 
-// Ör: /api/news?source=ai&province=Sivas&category=öneri&q=finans&aiOnly=true&limit=50&offset=0&order=desc
 app.get("/api/news", getNewsHandler);
 
 // Sadece AI içerenler (kısa yol)
