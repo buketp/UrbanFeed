@@ -33,6 +33,7 @@ outputType = "console"
 
 [agent]
 expertMode = true
+integrations = ["javascript_database:1.0.0"]
 
 [[ports]]
 localPort = 3000
