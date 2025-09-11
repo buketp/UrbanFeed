@@ -5,9 +5,13 @@ const { Client } = pkg;
 
 dotenv.config({ override: true });
 
-const url =
-  process.env.DATABASE_URL ||
-  "postgresql://postgres:password@127.0.0.1:5432/pressdb?sslmode=disable";
+// Database URL - should be set by start.sh
+const url = process.env.DATABASE_URL;
+
+if (!url) {
+  console.error("❌ DATABASE_URL not set! Migration cannot proceed.");
+  process.exit(1);
+}
 
 async function main() {
   const client = new Client({ connectionString: url });
