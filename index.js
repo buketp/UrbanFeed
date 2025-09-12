@@ -160,10 +160,20 @@ async function ensureNewsIndexes(pool) {
       ADD COLUMN IF NOT EXISTS source_id text;
   `);
 
-  // Benzersizlik (dup engelleme)
+  // Benzersizlik (dup engelleme) — migrasyonla aynı isim: news_fingerprint_key
   await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_news_fingerprint
-    ON public.news(fingerprint);
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind = 'i'
+          AND c.relname = 'news_fingerprint_key'
+          AND n.nspname = 'public'
+      ) THEN
+        CREATE UNIQUE INDEX news_fingerprint_key ON public.news(fingerprint);
+      END IF;
+    END$$;
   `);
 
   // Performans index'leri
@@ -315,8 +325,10 @@ function requireApiKey(req, res, next) {
 
 /* -------------------------- Şemalar -------------------------- */
 const NewsSchema = z.object({
-  source: z.string().min(2),
-  province: z.string().min(2),
+  // Artık opsiyonel: sadece source_id ile de çalışsın
+  source: z.string().min(2).optional(),
+  province: z.string().min(2).optional(),
+
   title: z.string().min(5),
   url: z.string().url(),
   category: z.enum(["şikayet", "soru", "öneri", "istek"]),
@@ -330,7 +342,7 @@ const NewsSchema = z.object({
 
   // Yeni alanlar (opsiyonel; varsa bağlarız)
   city_id: z.coerce.number().int().positive().optional(),
-  source_id: z.string().uuid().optional(),
+  source_id: z.string().optional(), // uuid zorunluluğu kaldırıldı
   rss_url: z.string().url().optional(),
 });
 
@@ -360,14 +372,42 @@ app.post("/api/news", requireApiKey, async (req, res) => {
   const canonicalUrl = normalizeUrl(d.url);
   const fp = fingerprintFromUrl(canonicalUrl);
 
-  // city_id / source_id çöz
-  const cityId = d.city_id ?? (await findCityIdByName(d.province));
-  const srcId = await resolveSourceId({
-    source_id: d.source_id,
-    rss_url: d.rss_url,
-    name: d.source,
-    city_id: cityId ?? null,
-  });
+  // 1) Eğer source_id verildiyse, kaynağı DB'den çek
+  let srcRow = null;
+  if (d.source_id) {
+    const r = await pool.query(
+      `select id, name, city_id from public.sources where id=$1 limit 1`,
+      [d.source_id],
+    );
+    srcRow = r.rows[0] || null;
+    if (!srcRow) {
+      return res.status(400).json({ error: "Geçersiz source_id" });
+    }
+  }
+
+  // 2) city_id çöz: öncelik sırası -> d.city_id -> srcRow.city_id -> province adı
+  let cityId = d.city_id ?? srcRow?.city_id ?? (await findCityIdByName(d.province));
+
+  // 3) source_id çöz: öncelik sırası -> d.source_id -> resolveSourceId(...)
+  let srcId =
+    d.source_id ??
+    (await resolveSourceId({
+      source_id: undefined,
+      rss_url: d.rss_url,
+      name: d.source ?? srcRow?.name,
+      city_id: cityId ?? null,
+    })) ??
+    srcRow?.id ??
+    null;
+
+  // 4) source adı ve province: kaynak/şehirden türet
+  let sourceName = d.source ?? srcRow?.name ?? "Bilinmeyen Kaynak";
+  let province = d.province ?? null;
+
+  if (!province && cityId) {
+    const q = await pool.query(`select name from public.cities where id=$1`, [cityId]);
+    if (q.rowCount) province = q.rows[0].name;
+  }
 
   try {
     const insertSql = `
@@ -404,7 +444,7 @@ app.post("/api/news", requireApiKey, async (req, res) => {
                 city_id as "cityId", source_id as "sourceId";
     `;
     const insertVals = [
-      id, fp, d.source, d.province, d.title, canonicalUrl,
+      id, fp, sourceName, province ?? "", d.title, canonicalUrl,
       d.category, tags, d.summary ?? null, pubAt, d.tweetText ?? null,
       cityId ?? null, srcId ?? null,
     ];

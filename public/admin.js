@@ -1,6 +1,6 @@
 // public/admin.js
 
-// API_KEY localStorage'da tutuluyorsa al (POST'larda kullanıyoruz)
+// API_KEY localStorage'da tutuluyorsa al (POST/DELETE'lerde kullanıyoruz)
 const API_KEY = localStorage.getItem("API_KEY") || "";
 
 // Mesaj kutuları (admin.html'de var)
@@ -19,9 +19,14 @@ function errMsg(t){ show(errEl, t); }
 async function loadCities() {
   try {
     const res = await fetch("/api/cities?flat=1");
-    const cities = await res.json();
+    const data = await res.json();
+    const cities = Array.isArray(data) ? data : (data.data || []);
+
+    // Türkçe locale ile alfabetik sırala
+    cities.sort((a, b) => a.name.localeCompare(b.name, "tr", { sensitivity: "base" }));
 
     const sel = document.getElementById("provinceSelect");
+    const prevValue = sel.value;
     sel.innerHTML = '<option value="">Şehir seç…</option>';
 
     cities.forEach((c) => {
@@ -31,10 +36,12 @@ async function loadCities() {
       sel.appendChild(o);
     });
 
-    // İlk şehir otomatik seçilsin istersen:
-    if (!sel.value && cities[0]) sel.value = cities[0].id;
+    if (prevValue && [...sel.options].some(o => o.value === prevValue)) {
+      sel.value = prevValue;
+    } else if (!sel.value && cities[0]) {
+      sel.value = String(cities[0].id);
+    }
 
-    // Şehirler yüklendikten sonra listeyi getir
     await loadSources();
   } catch (err) {
     console.error("Şehirler yüklenemedi:", err);
@@ -47,7 +54,7 @@ async function loadSources() {
   const tableBody = document.getElementById("sourcesTableBody");
   if (!tableBody) return;
 
-  tableBody.innerHTML = "<tr><td colspan='5'>Yükleniyor...</td></tr>";
+  tableBody.innerHTML = "<tr><td colspan='6'>Yükleniyor...</td></tr>";
 
   try {
     const cityId = document.getElementById("provinceSelect").value;
@@ -57,7 +64,7 @@ async function loadSources() {
     const data = json.data || [];
 
     if (data.length === 0) {
-      tableBody.innerHTML = "<tr><td colspan='5' class='muted'>Bu şehir için kaynak yok.</td></tr>";
+      tableBody.innerHTML = "<tr><td colspan='6' class='muted'>Bu şehir için kaynak yok.</td></tr>";
       return;
     }
 
@@ -79,11 +86,31 @@ async function loadSources() {
   }
 }
 
-// Yeni kaynak ekler
+// Sayfa yüklenince başlat ve event'leri bağla
+document.addEventListener("DOMContentLoaded", () => {
+  loadCities(); // bitince loadSources() zaten çağrılıyor
+
+  const form = document.getElementById("sourceForm");
+  if (form) form.addEventListener("submit", addSource);
+
+  const sel = document.getElementById("provinceSelect");
+  if (sel) sel.addEventListener("change", loadSources);
+
+  // 🗑️ Sil butonları için event delegation
+  const tableBody = document.getElementById("sourcesTableBody");
+  if (tableBody) {
+    tableBody.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn-del");
+      if (btn) deleteSource(btn.dataset.id);
+    });
+  }
+});
+
+// Yeni kaynak ekler (mevcut fonksiyon)
 async function addSource(e) {
   e.preventDefault();
 
-  const city_id = Number(document.getElementById("provinceSelect").value);
+  const city_id  = Number(document.getElementById("provinceSelect").value);
   const name     = document.getElementById("sourceName").value.trim();
   const rss_url  = document.getElementById("rssUrl").value.trim();
   const website  = document.getElementById("siteUrl").value.trim();
@@ -109,7 +136,6 @@ async function addSource(e) {
     if (!res.ok || !json.ok) throw new Error(json.error || "Kaynak eklenemedi.");
 
     okMsg("Kaynak eklendi.");
-    // Formu temizle ama şehir seçimini koru
     const form = document.getElementById("sourceForm");
     form && form.reset();
     document.getElementById("provinceSelect").value = String(city_id);
@@ -122,14 +148,3 @@ async function addSource(e) {
     if (addBtn) addBtn.disabled = false;
   }
 }
-
-// Sayfa yüklenince başlat ve event'leri bağla
-document.addEventListener("DOMContentLoaded", () => {
-  loadCities(); // bitince loadSources() zaten çağrılıyor
-
-  const form = document.getElementById("sourceForm");
-  if (form) form.addEventListener("submit", addSource);
-
-  const sel = document.getElementById("provinceSelect");
-  if (sel) sel.addEventListener("change", loadSources);
-});

@@ -5,7 +5,7 @@ const { Client } = pkg;
 
 dotenv.config({ override: true });
 
-// Database URL - should be set by start.sh
+// Database URL - should be set by start.sh or Secrets/.env
 const url = process.env.DATABASE_URL;
 
 if (!url) {
@@ -27,6 +27,7 @@ async function main() {
         is_active boolean not null default true,
         created_at timestamptz not null default now()
       );
+
       create table if not exists public.sources (
         id text primary key,
         city_id integer not null references public.cities(id) on delete cascade,
@@ -36,6 +37,7 @@ async function main() {
         is_active boolean not null default true,
         created_at timestamptz not null default now()
       );
+
       create index if not exists idx_sources_city on public.sources (city_id);
     `);
 
@@ -64,6 +66,78 @@ async function main() {
       create index if not exists idx_news_category on public.news (category);
       create index if not exists idx_news_tags     on public.news using gin (tags);
     `);
+
+    // === EK: sources <-> news ilişkisi, şehir bazlı filtreler ve backfill ===
+    console.log("2.5) news.source_id (FK) + index");
+    await client.query(`
+      alter table public.news
+        add column if not exists source_id text;
+
+      do $$
+      begin
+        if not exists (
+          select 1 from pg_constraint
+          where conname = 'fk_news_source'
+            and conrelid = 'public.news'::regclass
+        ) then
+          alter table public.news
+            add constraint fk_news_source
+            foreign key (source_id) references public.sources(id)
+            on delete set null on update cascade;
+        end if;
+      end$$;
+
+      create index if not exists idx_news_source on public.news(source_id);
+    `);
+
+    console.log("2.6) source(name) → source_id backfill (case-insensitive eşleme)");
+    await client.query(`
+      update public.news n
+         set source_id = s.id
+        from public.sources s
+       where n.source_id is null
+         and lower(n.source) = lower(s.name);
+    `);
+
+    console.log("2.7) sources (name, city_id) UNIQUE (aynı şehirde aynı isimli kaynağı engelle)");
+    // Duplicate varsa constraint eklemeyi atlayıp uyarı veriyoruz
+    await client.query(`
+      do $$
+      declare dup_count int;
+      begin
+        select count(*) into dup_count
+        from (
+          select name, city_id, count(*) c
+          from public.sources
+          group by 1,2
+          having count(*) > 1
+        ) t;
+
+        if dup_count = 0 then
+          if not exists (
+            select 1 from pg_constraint
+            where conname = 'uniq_sources_name_city'
+              and conrelid = 'public.sources'::regclass
+          ) then
+            alter table public.sources
+              add constraint uniq_sources_name_city unique (name, city_id);
+          end if;
+        else
+          raise notice 'Skipping unique(name,city_id) due to % duplicate group(s) in public.sources', dup_count;
+        end if;
+      end$$;
+    `);
+
+    console.log("2.8) province backfill (boş ise sources.city_id → cities.name ile doldur)");
+    await client.query(`
+      update public.news n
+         set province = c.name
+        from public.sources s
+        join public.cities c on c.id = s.city_id
+       where n.source_id = s.id
+         and (n.province is null or n.province = '');
+    `);
+    // === EK blok sonu ===
 
     console.log("3) URL üzerindeki UNIQUE kısıt/index'i kaldır (varsa)");
     try {
@@ -101,7 +175,7 @@ async function main() {
     // İleride gerekirse burada eşleme yapılacak
 
     console.log("7) source(name) → source_id eşle (opsiyonel, şimdilik geç)");
-    // İleride gerekirse burada eşleme yapılacak
+    // 2.6 zaten temel backfill'i yaptı; daha ileri kurallar eklenebilir.
 
     console.log("8) fingerprint çakışmalarını temizle (yenisini bırak)");
     await client.query(`
