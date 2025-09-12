@@ -656,6 +656,40 @@ app.post("/api/sources", async (req, res) => {
   }
 });
 
+// Kaynak silme (cascade: ilgili haberler de silinir)
+app.delete("/api/sources/:id", requireApiKey, async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // Önce o kaynağa bağlı haberleri sil
+    const newsDeleteResult = await pool.query(
+      "DELETE FROM public.news WHERE source_id = $1",
+      [id]
+    );
+    
+    // Sonra kaynağı sil
+    const sourceDeleteResult = await pool.query(
+      "DELETE FROM public.sources WHERE id = $1 RETURNING name",
+      [id]
+    );
+    
+    if (sourceDeleteResult.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: "Kaynak bulunamadı" });
+    }
+    
+    const sourceName = sourceDeleteResult.rows[0].name;
+    
+    res.json({ 
+      ok: true, 
+      message: `"${sourceName}" kaynağı ve ${newsDeleteResult.rowCount} haberi silindi`,
+      deletedNews: newsDeleteResult.rowCount
+    });
+  } catch (e) {
+    console.error("Kaynak silme hatası:", e);
+    res.status(500).json({ ok: false, error: "Kaynak silinemedi", detail: e.message });
+  }
+});
+
 /* ---------------------------- Admin route ---------------------------- */
 app.get("/admin", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));

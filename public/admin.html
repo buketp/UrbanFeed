@@ -29,6 +29,9 @@
     .err{color:var(--err);background:#fef2f2;border-color:#fecaca}
     .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
     .back{background:#111827;color:#fff;text-decoration:none;padding:8px 12px;border-radius:8px}
+    .btn-del{background:#dc2626;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:12px}
+    .btn-del:hover{background:#b91c1c}
+    .btn-del:disabled{opacity:.6;cursor:not-allowed}
   </style>
 </head>
 <body>
@@ -74,10 +77,10 @@
     <h3 style="margin-top:20px">Kaynaklar</h3>
     <table>
       <thead>
-        <tr><th>Ad</th><th>RSS</th><th>Site</th><th>Aktif</th><th>Eklenme</th></tr>
+        <tr><th>Ad</th><th>RSS</th><th>Site</th><th>Aktif</th><th>Eklenme</th><th>İşlem</th></tr>
       </thead>
       <tbody id="sourcesTableBody">
-        <tr><td colspan="5" class="muted">Liste yükleniyor…</td></tr>
+        <tr><td colspan="6" class="muted">Liste yükleniyor…</td></tr>
       </tbody>
     </table>
   </div>
