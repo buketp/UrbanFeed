@@ -324,6 +324,8 @@ function requireApiKey(req, res, next) {
 }
 
 /* -------------------------- Şemalar -------------------------- */
+const CATEGORY_VALUES = ["şikayet","soru","öneri","istek"];
+
 const NewsSchema = z.object({
   // Artık opsiyonel: sadece source_id ile de çalışsın
   source: z.string().min(2).optional(),
@@ -550,6 +552,22 @@ app.get("/api/news/last", async (_req, res) => {
   }
 });
 
+/* ✅ NEW: URL var mı? (kanonik fingerprint ile) */
+app.get("/api/news/exists", async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ ok: false, error: "missing url" });
+    const fp = fingerprintFromUrl(String(url));
+    const { rowCount } = await pool.query(
+      "select 1 from public.news where fingerprint = $1 limit 1",
+      [fp]
+    );
+    res.json({ ok: true, exists: rowCount > 0 });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "exists_failed", detail: e.message });
+  }
+});
+
 // Tüm haberleri sil (geliştirme amaçlı)
 app.delete("/api/news", requireApiKey, async (_req, res) => {
   try {
@@ -653,6 +671,167 @@ app.post("/api/sources", async (req, res) => {
   } catch (e) {
     console.error("sources add error:", e);
     res.status(500).json({ ok: false, error: "sources_add_failed", detail: e.message });
+  }
+});
+
+/* ---------------------------- ✅ NEW: City resolver ---------------------------- */
+// GET /api/city_id?name=<ad>  veya  /api/city_id?code=<num>
+app.get("/api/city_id", async (req, res) => {
+  try {
+    const name = (req.query.name ?? "").toString().trim();
+    const codeRaw = req.query.code;
+    let row = null;
+
+    if (name) {
+      const r = await pool.query(
+        "select id, name, code from public.cities where lower(name) = lower($1) limit 1",
+        [name]
+      );
+      row = r.rows[0] || null;
+    } else if (codeRaw !== undefined) {
+      const code = Number(codeRaw);
+      if (Number.isFinite(code)) {
+        const r = await pool.query(
+          "select id, name, code from public.cities where code = $1 limit 1",
+          [code]
+        );
+        row = r.rows[0] || null;
+      }
+    } else {
+      return res.status(400).json({ ok: false, error: "missing name or code" });
+    }
+
+    if (!row) return res.status(404).json({ ok: false, error: "not_found" });
+    res.json({ ok: true, city: row, id: row.id });
+  } catch (e) {
+    console.error("city_id error:", e);
+    res.status(500).json({ ok: false, error: "city_id_failed", detail: e.message });
+  }
+});
+
+/* ---------------------------- ✅ NEW: Tweet text endpoints ---------------------------- */
+const TweetPatchSchema = z.object({
+  tweetText: z.preprocess(
+    (v) => (typeof v === "string" ? v.trim() : v),
+    z.string().max(280).nullable().optional()
+  ),
+});
+
+// GET /api/tweet_text/:id  → habere ait tweet_text'i getirir
+app.get("/api/tweet_text/:id", async (req, res) => {
+  try {
+    const r = await pool.query(
+      `select id, title, url, category, tweet_text as "tweetText", created_at as "createdAt"
+         from public.news where id=$1 limit 1`,
+      [req.params.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "not_found" });
+    res.json({ ok: true, data: r.rows[0] });
+  } catch (e) {
+    console.error("tweet_text get error:", e);
+    res.status(500).json({ ok: false, error: "tweet_text_get_failed", detail: e.message });
+  }
+});
+
+// PATCH /api/tweet_text/:id { tweetText }  → tweet_text'i günceller/siler (API key gerekli)
+app.patch("/api/tweet_text/:id", requireApiKey, async (req, res) => {
+  try {
+    const p = TweetPatchSchema.safeParse(req.body);
+    if (!p.success) {
+      return res.status(400).json({ ok: false, error: "validation_error", details: p.error.flatten() });
+    }
+    const val = p.data.tweetText ?? null;
+    const r = await pool.query(
+      `update public.news set tweet_text = $1 where id = $2
+       returning id, tweet_text as "tweetText"`,
+      [val, req.params.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "not_found" });
+    res.json({ ok: true, data: r.rows[0] });
+  } catch (e) {
+    console.error("tweet_text patch error:", e);
+    res.status(500).json({ ok: false, error: "tweet_text_patch_failed", detail: e.message });
+  }
+});
+
+/* ---------------------------- ✅ NEW: Tags listing ---------------------------- */
+// GET /api/tags?city_id=&source_id=&q=&limit=&offset=&order=desc
+app.get("/api/tags", async (req, res) => {
+  try {
+    const { city_id, source_id, q, limit = 50, offset = 0, order = "desc" } = req.query;
+
+    const where = [];
+    const params = [];
+
+    if (city_id)  { params.push(Number(city_id));  where.push(`n.city_id = $${params.length}`); }
+    if (source_id){ params.push(String(source_id));where.push(`n.source_id = $${params.length}`); }
+
+    const direction = String(order).toLowerCase() === "asc" ? "asc" : "desc";
+
+    // Arama ifadesi
+    let likeParamIndex = null;
+    if (q) {
+      params.push(`%${String(q).toLowerCase()}%`);
+      likeParamIndex = params.length;
+    }
+
+    const safeLimit  = Number(limit) > 0 ? Math.min(Number(limit), 500) : 50;
+    const safeOffset = Number(offset) >= 0 ? Number(offset) : 0;
+    params.push(safeLimit);
+    params.push(safeOffset);
+
+    const sql = `
+      with t as (
+        select lower(trim(tag)) as tag
+          from public.news n
+          cross join unnest(coalesce(n.tags,'{}')) as tag
+         ${where.length ? "where " + where.join(" and ") : ""}
+      )
+      select tag, count(*)::int as count
+        from t
+       ${likeParamIndex ? `where tag like $${likeParamIndex}` : ""}
+       group by tag
+       order by count ${direction}, tag asc
+       limit $${params.length - 1}
+      offset $${params.length}
+    `;
+
+    const r = await pool.query(sql, params);
+    res.json({ ok: true, count: r.rowCount, data: r.rows });
+  } catch (e) {
+    console.error("tags error:", e);
+    res.status(500).json({ ok: false, error: "tags_failed", detail: e.message });
+  }
+});
+
+/* ---------------------------- ✅ NEW: Categories listing ---------------------------- */
+// GET /api/categories?city_id=&source_id=  → sabit liste + sayımlar
+app.get("/api/categories", async (req, res) => {
+  try {
+    const { city_id, source_id } = req.query;
+
+    const where = [];
+    const params = [];
+
+    if (city_id)  { params.push(Number(city_id));  where.push(`city_id = $${params.length}`); }
+    if (source_id){ params.push(String(source_id));where.push(`source_id = $${params.length}`); }
+
+    const sql = `
+      select category, count(*)::int as count
+        from public.news
+       ${where.length ? "where " + where.join(" and ") : ""}
+       group by category
+    `;
+    const r = await pool.query(sql, params);
+
+    // Tüm sabit kategorileri dön; eksik olanların count'unu 0 yap
+    const map = Object.fromEntries(r.rows.map(x => [x.category, x.count]));
+    const counts = CATEGORY_VALUES.map(cat => ({ category: cat, count: map[cat] ?? 0 }));
+
+    res.json({ ok: true, categories: CATEGORY_VALUES, counts });
+  } catch (e) {
+    console.error("categories error:", e);
+    res.status(500).json({ ok: false, error: "categories_failed", detail: e.message });
   }
 });
 

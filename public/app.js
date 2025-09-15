@@ -7,7 +7,7 @@
   };
 
   // ====== Ayarlar / API anahtarı (opsiyonel) ======
-  const API_KEY = "SENIN_API_KEYIN";
+  const API_KEY = "u3sr1";
 
   // ---- UI state
   const state = {
