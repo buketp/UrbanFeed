@@ -674,48 +674,6 @@ app.post("/api/sources", async (req, res) => {
   }
 });
 
-// Kaynak silme endpoint'i (API key gerekli)
-app.delete("/api/sources/:id", requireApiKey, async (req, res) => {
-  try {
-    const sourceId = req.params.id;
-    
-    // Önce kaynağın var olup olmadığını kontrol et
-    const checkQuery = await pool.query(
-      "select id, name from public.sources where id = $1",
-      [sourceId]
-    );
-    
-    if (checkQuery.rowCount === 0) {
-      return res.status(404).json({ ok: false, error: "Kaynak bulunamadı" });
-    }
-    
-    const sourceName = checkQuery.rows[0].name;
-    
-    // Önce o kaynaktan gelen haberleri sil
-    const deleteNewsQuery = await pool.query(
-      "delete from public.news where source_id = $1",
-      [sourceId]
-    );
-    
-    // Sonra kaynağı sil
-    const deleteSourceQuery = await pool.query(
-      "delete from public.sources where id = $1",
-      [sourceId]
-    );
-    
-    console.log(`Kaynak silindi: ${sourceName} (${deleteNewsQuery.rowCount} haber silindi)`);
-    
-    res.json({ 
-      ok: true, 
-      message: `${sourceName} kaynağı ve ${deleteNewsQuery.rowCount} haberi silindi`,
-      deletedNewsCount: deleteNewsQuery.rowCount
-    });
-  } catch (e) {
-    console.error("Source delete error:", e);
-    res.status(500).json({ ok: false, error: "Kaynak silinirken hata oluştu", detail: e.message });
-  }
-});
-
 /* ---------------------------- ✅ NEW: City resolver ---------------------------- */
 // GET /api/city_id?name=<ad>  veya  /api/city_id?code=<num>
 app.get("/api/city_id", async (req, res) => {
