@@ -77,6 +77,7 @@ async function loadSources() {
         <td>${s.website_url ? `<a href="${s.website_url}" target="_blank" rel="noreferrer">${s.website_url}</a>` : '-'}</td>
         <td>${s.is_active ? "✅" : "❌"}</td>
         <td>${new Date(s.created_at).toLocaleString("tr-TR")}</td>
+        <td><button class="btn-del" data-id="${s.id}" data-name="${s.name}">Sil</button></td>
       `;
       tableBody.appendChild(tr);
     });
@@ -105,6 +106,39 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+
+// Kaynak silme fonksiyonu
+async function deleteSource(sourceId) {
+  const btn = document.querySelector(`[data-id="${sourceId}"]`);
+  const sourceName = btn?.dataset.name || "Bu kaynak";
+  
+  if (!confirm(`${sourceName} kaynağı ve bu kaynaktan gelen TÜM haberler kalıcı olarak silinecek. Emin misiniz?`)) {
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/sources/${sourceId}`, {
+      method: "DELETE",
+      headers: { "x-api-key": API_KEY },
+    });
+    
+    const json = await res.json();
+    
+    if (!res.ok || !json.ok) {
+      throw new Error(json.error || "Kaynak silinemedi.");
+    }
+
+    okMsg(`${json.message}`);
+    await loadSources(); // Listeyi yenile
+  } catch (err) {
+    console.error("Kaynak silinirken hata:", err);
+    errMsg(err.message || "Kaynak silinirken hata oluştu.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 // Yeni kaynak ekler (mevcut fonksiyon)
 async function addSource(e) {
