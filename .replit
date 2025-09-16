@@ -38,3 +38,7 @@ integrations = ["javascript_database:1.0.0"]
 [[ports]]
 localPort = 3000
 externalPort = 3000
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["node", "index.js"]
