@@ -11,7 +11,7 @@
 
   // ---- UI state
   const state = {
-    province: "Sivas",
+    province: "",
     category: "all",
     q: "",
     limit: 50,
