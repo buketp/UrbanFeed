@@ -6,9 +6,13 @@
   <title>Yerel Basın</title>
   <style>
     :root{
-      --bg:#f4f6f8; --card:#fff; --text:#222; --muted:#666; --pill:#eef1f5;
-      --b:#e5e9ef; --shadow:0 10px 24px rgba(0,0,0,.06); --radius:16px;
-      --primary:#14213d; --danger:#dc3545;
+      --bg:#fff; --card:#fff; --text:#000; --muted:#666; --pill:#d1d5db;
+      --b:#e5e7eb; --shadow:none; --radius:12px;
+      --primary:#5c6fa2; --danger:#c53030;
+      --sidebar-bg:#5c6fa2;
+      --sidebar-hover:rgba(255,255,255,.15);
+      --sidebar-active:rgba(0,0,0,.2);
+      --input-bg:#e5e7eb;
     }
     *{box-sizing:border-box}
     body{
@@ -19,17 +23,17 @@
     /* ---------- Login Styles ---------- */
     .login-form{
       max-width:400px; margin:100px auto; padding:32px; background:var(--card);
-      border:1px solid var(--b); border-radius:var(--radius); box-shadow:var(--shadow);
+      border:1px solid var(--b); border-radius:var(--radius); box-shadow:0 4px 6px rgba(0,0,0,.05);
     }
     .login-form h1{text-align:center; margin-bottom:24px}
     .form-group{margin-bottom:16px}
     .form-group label{display:block; margin-bottom:4px; font-weight:600}
     .form-group input{
       width:100%; padding:12px; border:1px solid var(--b); border-radius:8px;
-      font-size:14px;
+      font-size:14px; background:var(--input-bg);
     }
     .btn{
-      padding:12px 24px; border:0; border-radius:8px; cursor:pointer; font-size:14px;
+      padding:10px 20px; border:0; border-radius:10px; cursor:pointer; font-size:14px;
       font-weight:600; text-decoration:none; display:inline-block; text-align:center;
     }
     .btn-primary{background:var(--primary); color:#fff}
@@ -42,53 +46,61 @@
     .app-shell{display:flex; min-height:100vh;}
 
     .sidebar{
-      width:240px; background:#101728; color:#fff; padding:24px 16px;
+      width:240px; background:var(--sidebar-bg); color:#fff; padding:24px 16px;
       position:sticky; top:0; height:100vh; display:flex; flex-direction:column; gap:16px;
-      border-right:1px solid rgba(255,255,255,.08);
     }
-    .brand{font-weight:800; letter-spacing:.2px; font-size:18px}
+    .brand{font-weight:800; letter-spacing:.2px; font-size:24px; margin-bottom:20px; color:#fff}
     .nav-item{
-      display:block; padding:10px 12px; margin-bottom:6px; border-radius:10px;
-      text-decoration:none; color:#dbe3ff; transition:background .15s ease,color .15s ease;
+      display:flex; align-items:center; gap:10px; padding:12px; margin-bottom:6px; border-radius:10px;
+      text-decoration:none; color:rgba(255,255,255,.8); transition:background .15s ease,color .15s ease;
+      font-weight:500;
     }
-    .nav-item:hover{background:rgba(255,255,255,.08); color:#fff}
-    .nav-item.active{background:#1f2a44; color:#fff}
-    .logout-side{
-      margin-top:auto; width:100%; padding:10px 12px; border:0; border-radius:10px;
-      background:#E24A4A; color:#fff; font-weight:600; cursor:pointer;
+    .nav-item:hover{background:var(--sidebar-hover); color:#fff}
+    .nav-item.active{background:var(--sidebar-active); color:#fff}
+    
+    .logout-btn{
+      margin-top:auto; width:100%; padding:12px; border:0; border-radius:12px;
+      background:var(--danger); color:#fff; font-weight:700; cursor:pointer;
+      font-size:16px;
     }
 
-    .main{flex:1; padding:24px;}
-    .container{max-width:960px; margin:0 auto;}
+    .main{flex:1; padding:40px;}
+    .container{max-width:1000px; margin:0 auto;}
 
     /* ---------- Main App Content Styles ---------- */
-    header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px}
-    h1{margin:0; font-size:28px; letter-spacing:.2px}
-    .controls{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:center}
+    header{margin-bottom:32px}
+    h1{margin:0; font-size:42px; font-weight:800; letter-spacing:-1px}
+    
+    .controls{display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; align-items:center}
     .chip{
-      border:1px solid var(--b); background:var(--pill); padding:8px 12px; border-radius:999px;
-      font-size:14px; cursor:pointer; user-select:none
+      background:var(--pill); padding:8px 16px; border-radius:10px;
+      font-size:14px; cursor:pointer; user-select:none; font-weight:500; color:#333;
     }
-    .chip.active{background:#14213d; color:#fff; border-color:#14213d}
-    .field{display:flex; gap:8px; align-items:center}
+    .chip.active{background:var(--primary); color:#fff}
+    
+    .field{display:flex; gap:8px; align-items:center; font-weight:700}
     input[type="text"]{
-      border:1px solid var(--b); background:#fff; border-radius:10px; padding:8px 12px; min-width:160px
+      border:0; background:var(--input-bg); border-radius:10px; padding:10px 16px; min-width:160px;
+      font-size:14px;
     }
+    input::placeholder{color:#999}
+    
     button.refresh{
-      border:0; background:#14213d; color:#fff; border-radius:10px; padding:8px 12px; cursor:pointer
+      border:0; background:var(--primary); color:#fff; border-radius:10px; padding:10px 24px; cursor:pointer;
+      font-weight:600;
     }
-    #meta{color:var(--muted); margin:6px 0 16px 0; font-size:14px}
+    #meta{color:var(--muted); margin:12px 0 24px 0; font-size:14px; font-weight:500}
 
     .card{
-      background:var(--card); border:1px solid var(--b); border-radius:var(--radius);
-      box-shadow:var(--shadow); padding:16px; margin:12px 0
+      background:var(--input-bg); border-radius:10px;
+      padding:12px 20px; margin:12px 0; font-weight:500;
     }
-    .card a.title{color:#0b57d0; font-weight:700; font-size:18px; text-decoration:underline}
-    .summary{color:#333; margin-top:8px}
-    .sub{color:var(--muted); font-size:13px; margin-top:6px}
+    .card a.title{color:#000; font-weight:700; font-size:18px; text-decoration:none}
+    .summary{color:#333; margin-top:4px}
+    .sub{color:var(--muted); font-size:13px; margin-top:4px}
     .tags{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
-    .tag{background:var(--pill); border:1px solid var(--b); padding:4px 8px; border-radius:999px; font-size:12px}
-    .cat{display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:8px}
+    .tag{background:rgba(0,0,0,.05); padding:4px 8px; border-radius:6px; font-size:12px}
+    .cat{display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; margin-left:8px; text-transform:uppercase; font-weight:700}
     .cat.şikayet{background:#ffe5e5; border:1px solid #ffc9c9}
     .cat.soru{background:#eaf5ff; border:1px solid #cfe7ff}
     .cat.istek{background:#e8ffe8; border:1px solid #c7f3c7}
