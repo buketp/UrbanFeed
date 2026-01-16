@@ -1,6 +1,7 @@
 // public/admin.js
 
 // API_KEY localStorage'da tutuluyorsa al (POST/DELETE'lerde kullanıyoruz)
+// (DELETE /api/sources/:id için gerek yok; header göndermeyeceğiz)
 const API_KEY = localStorage.getItem("API_KEY") || "";
 
 // Mesaj kutuları (admin.html'de var)
@@ -22,7 +23,6 @@ async function loadCities() {
     const data = await res.json();
     const cities = Array.isArray(data) ? data : (data.data || []);
 
-    // Türkçe locale ile alfabetik sırala
     cities.sort((a, b) => a.name.localeCompare(b.name, "tr", { sensitivity: "base" }));
 
     const sel = document.getElementById("provinceSelect");
@@ -77,12 +77,41 @@ async function loadSources() {
         <td>${s.website_url ? `<a href="${s.website_url}" target="_blank" rel="noreferrer">${s.website_url}</a>` : '-'}</td>
         <td>${s.is_active ? "✅" : "❌"}</td>
         <td>${new Date(s.created_at).toLocaleString("tr-TR")}</td>
+        <td>
+          <button class="btn-del" data-id="${s.id}" data-name="${s.name}">Sil</button>
+        </td>
       `;
       tableBody.appendChild(tr);
     });
   } catch (err) {
     console.error("Kaynaklar yüklenemedi:", err);
-    tableBody.innerHTML = "<tr><td colspan='5'>Hata oluştu</td></tr>";
+    tableBody.innerHTML = "<tr><td colspan='6'>Hata oluştu</td></tr>";
+  }
+}
+
+// Kaynak sil (buton)
+async function deleteSource(id) {
+  try {
+    const btn = document.querySelector(`.btn-del[data-id="${id}"]`);
+    const name = btn?.dataset?.name || "bu kaynak";
+    const ok = window.confirm(
+      `"${name}" kaynağını ve bu kaynaktan gelen TÜM haberleri kalıcı olarak silmek istediğine emin misin?`
+    );
+    if (!ok) return;
+
+    const res = await fetch(`/api/sources/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      // ⚠️ API key GÖNDERMİYORUZ (endpoint istemiyor)
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || "Silme işlemi başarısız.");
+
+    okMsg(`Silindi: ${name} (haber: ${json.deletedNews})`);
+    await loadSources();
+  } catch (err) {
+    console.error("Kaynak silinemedi:", err);
+    errMsg(err.message || "Kaynak silinemedi.");
   }
 }
 

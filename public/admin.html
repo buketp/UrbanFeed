@@ -29,6 +29,16 @@
     .err{color:var(--err);background:#fef2f2;border-color:#fecaca}
     .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
     .back{background:#111827;color:#fff;text-decoration:none;padding:8px 12px;border-radius:8px}
+
+    .btn-del{
+      background:#ef4444;
+      border:none;
+      color:#fff;
+      padding:6px 10px;
+      border-radius:8px;
+      cursor:pointer;
+    }
+    .btn-del:hover{opacity:.9}
   </style>
 </head>
 <body>
@@ -74,10 +84,12 @@
     <h3 style="margin-top:20px">Kaynaklar</h3>
     <table>
       <thead>
-        <tr><th>Ad</th><th>RSS</th><th>Site</th><th>Aktif</th><th>Eklenme</th></tr>
+        <tr>
+          <th>Ad</th><th>RSS</th><th>Site</th><th>Aktif</th><th>Eklenme</th><th>İşlem</th>
+        </tr>
       </thead>
       <tbody id="sourcesTableBody">
-        <tr><td colspan="5" class="muted">Liste yükleniyor…</td></tr>
+        <tr><td colspan="6" class="muted">Liste yükleniyor…</td></tr>
       </tbody>
     </table>
   </div>

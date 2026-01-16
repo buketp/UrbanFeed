@@ -35,7 +35,6 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
-  // prod DB'lerde genelde SSL gerekir, lokalde kapalı
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
@@ -70,11 +69,35 @@ function parseBooleanish(v, fallback = false) {
   return fallback;
 }
 
+/* ---------- Etiket normalize + sınırla (MAX 3) ---------- */
+function normTag(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/^#+/g, "")
+    .replace(/\s+/g, "_");
+}
+function capTags(input, extras = []) {
+  const all = [
+    ...(Array.isArray(input) ? input : []),
+    ...(Array.isArray(extras) ? extras : []),
+  ]
+    .map((x) => normTag(x))
+    .filter(Boolean);
+
+  const uniq = [];
+  for (const t of all) {
+    if (!uniq.includes(t)) uniq.push(t);
+    if (uniq.length >= 3) break; // MAX 3
+  }
+  return uniq;
+}
+
 /* ---------- URL normalize + fingerprint (yalnız URL’e göre) ---------- */
 function normalizeUrl(raw) {
   try {
     const u = new URL(String(raw).trim());
-    u.hash = ""; // #... kaldır
+    u.hash = "";
     const trash = [
       "utm_source",
       "utm_medium",
@@ -87,8 +110,8 @@ function normalizeUrl(raw) {
     ];
     trash.forEach((k) => u.searchParams.delete(k));
     let s = u.toString();
-    s = s.replace(/\?$/, ""); // boş ? varsa at
-    s = s.replace(/\/$/, ""); // sondaki /'ı kaldır
+    s = s.replace(/\?$/, "");
+    s = s.replace(/\/$/, "");
     return s.toLowerCase();
   } catch {
     return String(raw).trim().toLowerCase().replace(/[#?].*$/, "").replace(/\/$/, "");
@@ -146,7 +169,6 @@ async function ensureSourcesTable(pool) {
 async function ensureNewsIndexes(pool) {
   console.log("→ Ensuring news indexes...");
 
-  // Gerekli sütunlar
   await pool.query(`
     ALTER TABLE IF EXISTS public.news
       ADD COLUMN IF NOT EXISTS fingerprint text;
@@ -160,7 +182,6 @@ async function ensureNewsIndexes(pool) {
       ADD COLUMN IF NOT EXISTS source_id text;
   `);
 
-  // Benzersizlik (dup engelleme) — migrasyonla aynı isim: news_fingerprint_key
   await pool.query(`
     DO $$
     BEGIN
@@ -176,7 +197,6 @@ async function ensureNewsIndexes(pool) {
     END$$;
   `);
 
-  // Performans index'leri
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_news_time
     ON public.news ((coalesce(published_at, created_at)));
@@ -205,31 +225,6 @@ async function ensureNewsIndexes(pool) {
   console.log("✅ news indexes ok");
 }
 
-/* -------------------- 81 ili bir defaya mahsus seed et -------------------- */
-async function seedCitiesIfEmpty(pool) {
-  const check = await pool.query("select count(*)::int as c from public.cities");
-  if (check.rows[0].c > 0) return;
-
-  const provinces = [
-    "Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın",
-    "Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum",
-    "Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun",
-    "Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri",
-    "Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin",
-    "Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas",
-    "Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray",
-    "Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova","Karabük",
-    "Kilis","Osmaniye","Düzce"
-  ];
-  const insert = `insert into public.cities (name, code)
-                  values ($1, $2) on conflict (name) do nothing`;
-
-  for (let i = 0; i < provinces.length; i++) {
-    await pool.query(insert, [provinces[i], i + 1]);
-  }
-  console.log("✅ Seeded 81 cities");
-}
-
 /* ---------------------------- ID çözümleyen yardımcılar ---------------------------- */
 async function findCityIdByName(name) {
   if (!name) return null;
@@ -241,10 +236,8 @@ async function findCityIdByName(name) {
 }
 
 async function resolveSourceId({ source_id, rss_url, name, city_id }) {
-  // 1) Doğrudan source_id verilmişse
   if (source_id) return source_id;
 
-  // 2) rss_url üzerinden eşle
   if (rss_url) {
     const r = await pool.query(
       "select id from public.sources where rss_url=$1 limit 1",
@@ -253,7 +246,6 @@ async function resolveSourceId({ source_id, rss_url, name, city_id }) {
     if (r.rows[0]?.id) return r.rows[0].id;
   }
 
-  // 3) name + city_id (daha güçlü eşleşme)
   if (name && city_id) {
     const r = await pool.query(
       "select id from public.sources where name=$1 and city_id=$2 limit 1",
@@ -262,7 +254,6 @@ async function resolveSourceId({ source_id, rss_url, name, city_id }) {
     if (r.rows[0]?.id) return r.rows[0].id;
   }
 
-  // 4) sadece name (en zayıf)
   if (name) {
     const r = await pool.query(
       "select id from public.sources where name=$1 limit 1",
@@ -276,7 +267,7 @@ async function resolveSourceId({ source_id, rss_url, name, city_id }) {
 
 /* ---------------------------- Middleware ---------------------------- */
 app.disable("x-powered-by");
-app.disable("etag"); // agresif cache kapalı
+app.disable("etag");
 app.use((req, res, next) => {
   res.set("Cache-Control","no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
   res.set("Pragma", "no-cache");
@@ -327,14 +318,13 @@ function requireApiKey(req, res, next) {
 const CATEGORY_VALUES = ["şikayet","soru","öneri","istek"];
 
 const NewsSchema = z.object({
-  // Artık opsiyonel: sadece source_id ile de çalışsın
   source: z.string().min(2).optional(),
   province: z.string().min(2).optional(),
 
   title: z.string().min(5),
   url: z.string().url(),
   category: z.enum(["şikayet", "soru", "öneri", "istek"]),
-  tags: z.array(z.string().min(1)).max(5).optional(),
+  tags: z.array(z.string().min(1)).max(3).optional(), // MAX 3
   summary: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.string().min(10).optional(),
@@ -342,9 +332,8 @@ const NewsSchema = z.object({
   publishedAt: z.string().datetime().optional(),
   tweetText: z.string().max(280).optional(),
 
-  // Yeni alanlar (opsiyonel; varsa bağlarız)
   city_id: z.coerce.number().int().positive().optional(),
-  source_id: z.string().optional(), // uuid zorunluluğu kaldırıldı
+  source_id: z.string().optional(),
   rss_url: z.string().url().optional(),
 });
 
@@ -367,10 +356,13 @@ app.post("/api/news", requireApiKey, async (req, res) => {
 
   const d = parsed.data;
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  const tags = ensureStringArray(d.tags);
+
+  // Etiketleri normalize + en fazla 3’e indir
+  const tags = capTags(d.tags);
+
   const pubAt = toIsoOrNull(d.publishedAt);
 
-  // URL normalize + fingerprint (dup’ları durdurur)
+  // URL normalize + fingerprint
   const canonicalUrl = normalizeUrl(d.url);
   const fp = fingerprintFromUrl(canonicalUrl);
 
@@ -387,10 +379,10 @@ app.post("/api/news", requireApiKey, async (req, res) => {
     }
   }
 
-  // 2) city_id çöz: öncelik sırası -> d.city_id -> srcRow.city_id -> province adı
+  // 2) city_id çöz
   let cityId = d.city_id ?? srcRow?.city_id ?? (await findCityIdByName(d.province));
 
-  // 3) source_id çöz: öncelik sırası -> d.source_id -> resolveSourceId(...)
+  // 3) source_id çöz
   let srcId =
     d.source_id ??
     (await resolveSourceId({
@@ -402,7 +394,7 @@ app.post("/api/news", requireApiKey, async (req, res) => {
     srcRow?.id ??
     null;
 
-  // 4) source adı ve province: kaynak/şehirden türet
+  // 4) source/province türet
   let sourceName = d.source ?? srcRow?.name ?? "Bilinmeyen Kaynak";
   let province = d.province ?? null;
 
@@ -423,12 +415,15 @@ app.post("/api/news", requireApiKey, async (req, res) => {
       set
         tweet_text   = coalesce(excluded.tweet_text, news.tweet_text),
         tags         = case
-                         when excluded.tags is not null then (
-                           select array(
-                             select distinct t
-                             from unnest(coalesce(news.tags,'{}') || coalesce(excluded.tags,'{}')) t
+                         when excluded.tags is not null then
+                           (
+                             (
+                               array(
+                                 select distinct t
+                                 from unnest(coalesce(news.tags,'{}') || coalesce(excluded.tags,'{}')) as t
+                               )
+                             )[1:3]
                            )
-                         )
                          else news.tags
                        end,
         category     = coalesce(excluded.category, news.category),
@@ -487,7 +482,6 @@ async function getNewsHandler(req, res) {
     );
   }
 
-  // limit/offset güvenliği
   const rawLimit = parseInt(limit, 10);
   const safeLimit = Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 500 ? rawLimit : 50;
   const rawOffset = parseInt(offset, 10);
@@ -523,7 +517,7 @@ async function getNewsHandler(req, res) {
 
 app.get("/api/news", getNewsHandler);
 
-// Sadece AI içerenler (kısa yol)
+// Sadece AI içerenler
 app.get("/api/ai-news", (req, res) => {
   req.query.aiOnly = "true";
   return getNewsHandler(req, res);
@@ -533,7 +527,7 @@ app.get("/api/ai-news", (req, res) => {
 app.get("/api/news/count", async (_req, res) => {
   try {
     const r = await pool.query("select count(*) from news");
-    res.json({ ok: true, count: Number(r.rows[0].count) });
+  res.json({ ok: true, count: Number(r.rows[0].count) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -552,7 +546,7 @@ app.get("/api/news/last", async (_req, res) => {
   }
 });
 
-/* ✅ NEW: URL var mı? (kanonik fingerprint ile) */
+/*  URL var mı? */
 app.get("/api/news/exists", async (req, res) => {
   try {
     const url = req.query.url;
@@ -595,25 +589,42 @@ app.get("/api/cities", async (req, res) => {
     res.status(500).json({ ok: false, error: "cities_failed", detail: e.message });
   }
 });
+
+// Sources (JOIN ile province döner)
 app.get("/api/sources", async (req, res) => {
   try {
     const { city_id, is_active } = req.query;
-    const clauses = [];
+
+    const where = [];
     const vals = [];
-    if (city_id) {
-      clauses.push(`city_id = $${vals.push(Number(city_id))}`);
+
+    if (city_id !== undefined) {
+      vals.push(Number(city_id));
+      where.push(`s.city_id = $${vals.length}`);
     }
     if (is_active !== undefined) {
-      clauses.push(`is_active = $${vals.push(parseBooleanish(is_active, true))}`);
+      vals.push(parseBooleanish(is_active, true));
+      where.push(`s.is_active = $${vals.length}`);
     } else {
-      clauses.push(`is_active = true`);
+      where.push(`s.is_active = true`);
     }
+
     const sql = `
-      select id, city_id, name, rss_url, website_url, is_active, created_at
-        from public.sources
-       ${clauses.length ? "where " + clauses.join(" and ") : ""}
-       order by created_at desc
+      select
+        s.id,
+        s.city_id,
+        c.name as province,
+        s.name,
+        s.rss_url,
+        s.website_url,
+        s.is_active,
+        s.created_at
+      from public.sources s
+      join public.cities c on c.id = s.city_id
+      ${where.length ? "where " + where.join(" and ") : ""}
+      order by s.created_at desc
     `;
+
     const r = await pool.query(sql, vals);
     res.json({ ok: true, count: r.rowCount, data: r.rows });
   } catch (e) {
@@ -621,6 +632,8 @@ app.get("/api/sources", async (req, res) => {
     res.status(500).json({ ok: false, error: "sources_list_failed", detail: e.message });
   }
 });
+
+// Add/Upsert Source
 app.post("/api/sources", async (req, res) => {
   try {
     const p = SourceSchema.safeParse(req.body);
@@ -629,7 +642,6 @@ app.post("/api/sources", async (req, res) => {
     }
     const d = p.data;
 
-    // Şehir adı webhook için
     const cityQ = await pool.query("select name from public.cities where id = $1", [d.city_id]);
     const cityName = cityQ.rows[0]?.name || null;
 
@@ -647,7 +659,6 @@ app.post("/api/sources", async (req, res) => {
     const r = await pool.query(upsert, vals);
     const sourceRow = r.rows[0];
 
-    // n8n webhook (varsa)
     const hook = process.env.N8N_SOURCE_ADDED_WEBHOOK;
     if (hook) {
       (async () => {
@@ -674,8 +685,96 @@ app.post("/api/sources", async (req, res) => {
   }
 });
 
-/* ---------------------------- ✅ NEW: City resolver ---------------------------- */
-// GET /api/city_id?name=<ad>  veya  /api/city_id?code=<num>
+/* ✅ Kaynak + o kaynağın TÜM haberlerini sil (API key istemez) */
+app.delete("/api/sources/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!id || typeof id !== "string" || !id.trim()) {
+    return res.status(400).json({ ok: false, error: "invalid_source_id" });
+  }
+
+  // JS tarafında domain çıkarıcı
+  const hostOf = (u) => {
+    try {
+      return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  };
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Kaynağı oku (domain'leri de al)
+    const srcQ = await client.query(
+      "select id, name, city_id, website_url, rss_url from public.sources where id = $1 limit 1",
+      [id]
+    );
+    if (srcQ.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "source_not_found" });
+    }
+    const src = srcQ.rows[0];
+
+    // domain adayları
+    const hostSet = new Set();
+    if (src.website_url) hostSet.add(hostOf(src.website_url));
+    if (src.rss_url)     hostSet.add(hostOf(src.rss_url));
+    const hosts = [...hostSet].filter(Boolean);
+
+    // 1) source_id eşleşenler
+    const d1 = await client.query(
+      "delete from public.news where source_id = $1",
+      [id]
+    );
+
+    // 2) eski kayıtlar: source adı + şehir eşleşmesi
+    let d2 = { rowCount: 0 };
+    if (src.name) {
+      d2 = await client.query(
+        `delete from public.news n
+          where n.source_id is null
+            and lower(n.source) = lower($1)
+            and (n.city_id = $2 or n.city_id is null)`,
+        [src.name, src.city_id]
+      );
+    }
+
+    // 3) domain eşleşmesi (haber url domain == kaynak domain(leri))
+    let d3 = { rowCount: 0 };
+    if (hosts.length) {
+      d3 = await client.query(
+        `delete from public.news n
+          where split_part(regexp_replace(lower(n.url), '^https?://(www\\.)?', ''), '/', 1)
+                = any($1::text[])`,
+        [hosts]
+      );
+    }
+
+    // 4) Kaynağın kendisini sil
+    const delSource = await client.query(
+      "delete from public.sources where id = $1 returning id, name",
+      [id]
+    );
+
+    await client.query("COMMIT");
+    return res.json({
+      ok: true,
+      deletedNews: d1.rowCount + d2.rowCount + d3.rowCount,
+      details: { bySourceId: d1.rowCount, byNameCity: d2.rowCount, byDomain: d3.rowCount },
+      deletedSource: delSource.rowCount,
+      source: delSource.rows[0],
+    });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error("source delete error:", e);
+    return res.status(500).json({ ok: false, error: "source_delete_failed", detail: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+/* ---------------------------- ity resolver ---------------------------- */
 app.get("/api/city_id", async (req, res) => {
   try {
     const name = (req.query.name ?? "").toString().trim();
@@ -709,53 +808,7 @@ app.get("/api/city_id", async (req, res) => {
   }
 });
 
-/* ---------------------------- ✅ NEW: Tweet text endpoints ---------------------------- */
-const TweetPatchSchema = z.object({
-  tweetText: z.preprocess(
-    (v) => (typeof v === "string" ? v.trim() : v),
-    z.string().max(280).nullable().optional()
-  ),
-});
-
-// GET /api/tweet_text/:id  → habere ait tweet_text'i getirir
-app.get("/api/tweet_text/:id", async (req, res) => {
-  try {
-    const r = await pool.query(
-      `select id, title, url, category, tweet_text as "tweetText", created_at as "createdAt"
-         from public.news where id=$1 limit 1`,
-      [req.params.id]
-    );
-    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "not_found" });
-    res.json({ ok: true, data: r.rows[0] });
-  } catch (e) {
-    console.error("tweet_text get error:", e);
-    res.status(500).json({ ok: false, error: "tweet_text_get_failed", detail: e.message });
-  }
-});
-
-// PATCH /api/tweet_text/:id { tweetText }  → tweet_text'i günceller/siler (API key gerekli)
-app.patch("/api/tweet_text/:id", requireApiKey, async (req, res) => {
-  try {
-    const p = TweetPatchSchema.safeParse(req.body);
-    if (!p.success) {
-      return res.status(400).json({ ok: false, error: "validation_error", details: p.error.flatten() });
-    }
-    const val = p.data.tweetText ?? null;
-    const r = await pool.query(
-      `update public.news set tweet_text = $1 where id = $2
-       returning id, tweet_text as "tweetText"`,
-      [val, req.params.id]
-    );
-    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: "not_found" });
-    res.json({ ok: true, data: r.rows[0] });
-  } catch (e) {
-    console.error("tweet_text patch error:", e);
-    res.status(500).json({ ok: false, error: "tweet_text_patch_failed", detail: e.message });
-  }
-});
-
-/* ---------------------------- ✅ NEW: Tags listing ---------------------------- */
-// GET /api/tags?city_id=&source_id=&q=&limit=&offset=&order=desc
+/* ---------------------------- Tags listing ---------------------------- */
 app.get("/api/tags", async (req, res) => {
   try {
     const { city_id, source_id, q, limit = 50, offset = 0, order = "desc" } = req.query;
@@ -768,7 +821,6 @@ app.get("/api/tags", async (req, res) => {
 
     const direction = String(order).toLowerCase() === "asc" ? "asc" : "desc";
 
-    // Arama ifadesi
     let likeParamIndex = null;
     if (q) {
       params.push(`%${String(q).toLowerCase()}%`);
@@ -804,8 +856,7 @@ app.get("/api/tags", async (req, res) => {
   }
 });
 
-/* ---------------------------- ✅ NEW: Categories listing ---------------------------- */
-// GET /api/categories?city_id=&source_id=  → sabit liste + sayımlar
+/* ---------------------------- Categories listing ---------------------------- */
 app.get("/api/categories", async (req, res) => {
   try {
     const { city_id, source_id } = req.query;
@@ -824,7 +875,6 @@ app.get("/api/categories", async (req, res) => {
     `;
     const r = await pool.query(sql, params);
 
-    // Tüm sabit kategorileri dön; eksik olanların count'unu 0 yap
     const map = Object.fromEntries(r.rows.map(x => [x.category, x.count]));
     const counts = CATEGORY_VALUES.map(cat => ({ category: cat, count: map[cat] ?? 0 }));
 
@@ -850,7 +900,6 @@ app.get(/^\/(?!api)(?!__whoami)(?!health)(?!admin).*/, (_req, res) => {
   try {
     await ensureCitiesTable(pool);
     await ensureSourcesTable(pool);
-    await seedCitiesIfEmpty(pool);
     await ensureNewsIndexes(pool);
 
     app.listen(PORT, "0.0.0.0", () => {
