@@ -1,0 +1,229 @@
+{
+  "name": "Ek- Enrich and Save News",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "title"
+            },
+            {
+              "name": "url"
+            },
+            {
+              "name": "summary"
+            },
+            {
+              "name": "publishedAt"
+            },
+            {
+              "name": "source_id"
+            },
+            {
+              "name": "source"
+            },
+            {
+              "name": "province"
+            },
+            {
+              "name": "city_id"
+            },
+            {
+              "name": "rss_url"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -64,
+        -48
+      ],
+      "id": "b69b5467-48fe-4bb3-807d-8ebb96a16f1f",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Aşağıda verilen haber metninden hareket et. Bir vatandaş yazıyormuş gibi, kısa ve doğal bir\nmesaja (tweet tarzı) dönüştür. Ardından kategoriyi seç ve 3 etiket öner.\n\nBaşlık: {{$json.title}}\nÖzet: {{$json.summary || \"\"}}\nBağlantı: {{$json.url}}\nİl: {{$json.province || $json.city_name || \"\"}}\nYayın zamanı (ISO, boş olabilir): {{$json.publishedAt || \"\"}}\n\nKurallar:\n1) category SADECE şu dörtlüden biri olsun (küçük harf): [\"şikayet\",\"soru\",\"öneri\",\"istek\"].\n2) tweetText: 200 karakteri geçmesin, doğal ve insani dille yaz. Hashtag VE emoji kullanma.\n3) tags: 2–3 öğe, tamamen küçük harf, boşluk ve # işareti yok. (örn: \"ulasim\",\"altyapi\",\"sehir\")\n4) Geçerli JSON dışında hiçbir şey yazma; kod bloğu, açıklama, yorum yok.\n5) JSON alanlarını eksiksiz doldur. Metinlerde çift tırnakları gerektiği gibi escape et.\n\nSADECE ŞU JSON’U DÖNDÜR (başka metin yok):\n{\n  \"source\": \"rss\",\n  \"province\": \"{{$json.province || $json.city_name || \"\"}}\",\n  \"title\": \"{{$json.title}}\",\n  \"url\": \"{{$json.url}}\",\n  \"category\": \"<şikayet|soru|öneri|istek>\",\n  \"tags\": [\"<tag1>\",\"<tag2>\"],\n  \"summary\": \"{{$json.summary || \"\"}}\",\n  \"publishedAt\": \"{{$json.publishedAt || \"\"}}\",\n  \"tweetText\": \"<200 karakterlik vatandaş mesajı, hashtag yok>\"\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        96,
+        -48
+      ],
+      "id": "a4144838-b57f-4e3d-b1d2-8fa7147b05e8",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {
+          "temperature": 1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        96,
+        112
+      ],
+      "id": "98ec2b6d-9b61-4d97-91b6-f232d28110a9",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Code (Prepare Body) — Run Once for Each Item\n\n/** ---------- Helpers ---------- **/\nfunction firstDefined(...arr){ return arr.find(v => v !== undefined && v !== null); }\nfunction cleanStr(v, minLen = 1) {\n  if (v === undefined || v === null) return null;\n  const s = String(v).trim();\n  return s.length >= minLen ? s : null;\n}\nconst safeStr = (v) => (v == null ? \"\" : String(v));\nfunction toISO(x){\n  if (!x) return null;\n  const d = new Date(x);\n  return Number.isFinite(d.getTime()) ? d.toISOString() : null;\n}\nconst ALLOWED = new Set([\"şikayet\",\"soru\",\"öneri\",\"istek\"]);\nfunction sanitizeTags(tags){\n  if (!Array.isArray(tags)) return [];\n  const out = []; const seen = new Set();\n  for (const t of tags) {\n    let s = String(t ?? \"\").toLowerCase().trim();\n    if (!s) continue;\n    s = s.replace(/^#+/g,\"\").replace(/\\s+/g,\"_\");\n    if (!seen.has(s)) { seen.add(s); out.push(s); }\n    if (out.length >= 5) break;\n  }\n  return out;\n}\nfunction guessCategoryFromText(title=\"\", summary=\"\") {\n  const t = (title + \" \" + summary).toLowerCase();\n  if (title.includes(\"?\") || summary.includes(\"?\")) return \"soru\";\n  if (/\\b(mı|mi|mu|mü)\\b/.test(t)) return \"soru\";\n  if (/\\b(nasıl|neden|mümkün mü|var mı|olur mu|kim|ne zaman)\\b/.test(t)) return \"soru\";\n  if (/\\b(şikayet|sorun|problem|rezalet|mağdur|kesinti|ariza|kötü|çukur|koku)\\b/.test(t)) return \"şikayet\";\n  if (/\\b(istek|talep|lütfen|ricamız|istiyoruz|gerekiyor|olmalı|yapılsın)\\b/.test(t)) return \"istek\";\n  if (/\\b(öneri|öneriyorum|yapılabilir|iyileştirme|olsa iyi olur|düşünelim)\\b/.test(t)) return \"öneri\";\n  return \"öneri\";\n}\nconst ensureObject = (x) => (x && typeof x === \"object\" && !Array.isArray(x)) ? x : {};\nfunction ensureMinLen(s, min = 10) {\n  if (s == null) return null;\n  const t = String(s).replace(/\\s+/g, \" \").trim();\n  return t.length >= min ? t : null;\n}\n\n/** ---------- 1) LLM çıktısı ---------- **/\nlet raw = firstDefined(\n  $json.text, $json.output, $json.response, $json.data,\n  $json.completion, $json.message, $json.result, $json\n);\nif (typeof raw === \"string\") {\n  const s = raw.trim().replace(/^```(?:json)?\\s*/i, \"\").replace(/```$/,\"\");\n  try { raw = JSON.parse(s); } catch { raw = {}; }\n}\nif (Array.isArray(raw)) raw = raw[0] ?? {};\nraw = ensureObject(raw);\n\n/** ---------- 2) Trigger’dan gelen ham giriş ---------- **/\nlet origin = {};\ntry { origin = ($items(\"When Executed by Another Workflow\", 0) || [])[0]?.json || {}; } catch {}\norigin = ensureObject(origin);\n\n/** ---------- 3) Birleştir ---------- **/\nconst llm = raw;\n\n// kategori\nlet category = (cleanStr(llm.category)?.toLowerCase() || \"\");\nif (!ALLOWED.has(category)) {\n  category = guessCategoryFromText(\n    safeStr(llm.title || origin.title),\n    safeStr(llm.summary || origin.summary)\n  );\n}\nif (!ALLOWED.has(category)) category = \"öneri\";\n\n// url temizle\nconst cleanedUrlRaw = cleanStr(llm.url ?? origin.url);\nconst cleanedUrl = cleanedUrlRaw ? cleanedUrlRaw.replace(/^[\"']|[\"']$/g, \"\") : null;\n\n// opsiyonel alanlar\nconst province  = cleanStr(llm.province ?? origin.province, 2) || null;\nconst source_id = cleanStr(origin.source_id, 1) || null;\nconst rss_url   = cleanStr(origin.rss_url, 5) || null;\n\nconst cityNum = Number(origin.city_id);\nconst city_id = Number.isFinite(cityNum) && cityNum > 0 ? cityNum : null;\n\n// summary: min. 10 karakter zorunluluğu + fallback\nlet summary =\n  ensureMinLen(llm.summary ?? origin.summary, 10) ||\n  ensureMinLen(origin.summary, 10) ||\n  ensureMinLen(llm.tweetText, 10) ||\n  ensureMinLen((llm.title ?? origin.title), 10);\n\nif (!summary) {\n  const t = (llm.title ?? origin.title) || \"Detaylar için bağlantıya bakınız\";\n  summary = `${t} — detaylar bağlantıda.`;\n}\nsummary = summary.slice(0, 1000);\n\n// body\nlet body = {\n  source:      cleanStr(llm.source ?? origin.source ?? \"rss\"),\n  province,\n  title:       cleanStr(llm.title ?? origin.title)?.slice(0, 300),\n  url:         cleanedUrl,\n\n  category,\n  tags:        sanitizeTags(llm.tags ?? []).slice(0, 3),\n  summary,\n  publishedAt: toISO(llm.publishedAt ?? origin.publishedAt),\n  tweetText:   cleanStr(llm.tweetText)?.slice(0, 280),\n\n  source_id,\n  city_id,\n  rss_url,\n};\n\n// zorunlular\nif (!body.title) throw new Error(\"title boş. (Trigger/origin.title da boş)\");\nif (!body.url)   throw new Error(\"url boş. (Trigger/origin.url da boş)\");\n\n// null/undefined alanları çıkararak gönder\nconst out = {};\nfor (const [k,v] of Object.entries(body)) {\n  if (v !== undefined && v !== null) out[k] = v;\n}\nreturn { json: out };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        -48
+      ],
+      "id": "c40ebd31-8603-4746-9859-4a6b1cbb489b",
+      "name": "Code (Prepare Body)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$vars.BASE_URL}}/api/news",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{$vars.API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        -48
+      ],
+      "id": "e6cbd625-73bc-4283-b9ff-1362943a42d5",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.BASE_URL }}/api/news",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        -48
+      ],
+      "id": "ccdd70a6-b986-46dd-ac3f-9ee7ba0bb837",
+      "name": "HTTP Request GET"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code (Prepare Body)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (Prepare Body)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request GET",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}

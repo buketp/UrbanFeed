@@ -1,0 +1,414 @@
+{
+  "name": "Hourly Fetch",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        64,
+        -176
+      ],
+      "id": "efc255bc-05c9-413a-a9db-2f7338a6a776",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.BASE_URL }}/api/sources?is_active=1",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        -176
+      ],
+      "id": "b3a5178e-9987-4366-a8fb-a62ebb98b478",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.data.rss_url}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -176
+      ],
+      "id": "3c3d363e-35e1-47dd-9640-2a70cbc2653e",
+      "name": "RSS Read"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -176
+      ],
+      "id": "96c4a849-0168-4df3-8687-98e75ccffaf4",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code (Attach Source Fields) — Run Once for All Items\n// Split Out içinde data sargısı varsa onu da ele al\n\nfunction getSourcesArray() {\n  try {\n    const arr = $items(\"Split Out\", 0);\n    if (Array.isArray(arr) && arr.length) {\n      // data varsa onu al, yoksa json’u al\n      return arr.map(x => (x?.json?.data ?? x?.json ?? x ?? {}));\n    }\n  } catch (_) {}\n  const httpNames = [\"GET /api/sources\", \"HTTP Request\"];\n  for (const nm of httpNames) {\n    try {\n      const arr = $items(nm, 0);\n      if (Array.isArray(arr) && arr.length) {\n        const data = arr[0]?.json?.data;\n        if (Array.isArray(data)) return data;\n      }\n    } catch (_) {}\n  }\n  return [];\n}\nconst sources = getSourcesArray();\n\nfunction hostOf(u) {\n  try { return new URL(String(u)).hostname.toLowerCase(); }\n  catch { const m = String(u||\"\").match(/\\/\\/([^/]+)/); return m ? m[1].toLowerCase() : \"\"; }\n}\nfunction normalizeCategories(cats){\n  if (Array.isArray(cats)) { const out = cats.map(v=>String(v).trim()).filter(Boolean); return out.length?out:null; }\n  if (typeof cats === \"string\") { const out = cats.split(\",\").map(s=>s.trim()).filter(Boolean); return out.length?out:null; }\n  return null;\n}\n\nfunction pickSourceMetaByIndex(i){\n  const s = sources?.[i] || {};\n  return {\n    source_id: s.id ?? null,\n    source:    s.name ?? null,\n    province:  s.province ?? null,     // Split Out'ta yoksa null kalır (normal)\n    city_id:   s.city_id ?? null,\n    rss_url:   s.rss_url ?? null,\n    website_url: s.website_url ?? undefined,\n  };\n}\nfunction guessSourceIndexFromUrl(j){\n  const linkHost = hostOf(j.link || j.url || \"\");\n  if (!linkHost) return -1;\n  for (let i=0;i<sources.length;i++){\n    const s = sources[i] || {};\n    const h1 = hostOf(s.website_url);\n    const h2 = hostOf(s.rss_url);\n    if (linkHost === h1 || linkHost === h2) return i;\n  }\n  return -1;\n}\n\nconst out = [];\nfor (let idx=0; idx<items.length; idx++){\n  const item = items[idx];\n\n  let srcIdx = null;\n  const pi = item.pairedItem;\n  if (Array.isArray(pi) && pi.length && Number.isInteger(pi[0]?.item)) srcIdx = pi[0].item;\n  else if (pi && Number.isInteger(pi.item)) srcIdx = pi.item;\n\n  if (!Number.isInteger(srcIdx)) {\n    const g = guessSourceIndexFromUrl(item.json || {});\n    if (g >= 0) srcIdx = g;\n  }\n\n  const meta = Number.isInteger(srcIdx)\n    ? pickSourceMetaByIndex(srcIdx)\n    : { source_id:null, source:null, province:null, city_id:null, rss_url:null };\n\n  const cats = normalizeCategories(item.json.categories ?? item.json.category ?? null);\n\n  out.push({\n    json: { ...item.json, ...(cats ? {categories: cats} : {}), ...meta },\n    pairedItem: item.pairedItem,\n  });\n}\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -176
+      ],
+      "id": "e0b1ef7c-d3f7-4665-a0b4-3d54dc4e426b",
+      "name": "Code (Attach Source Fields)"
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.BASE_URL}}/api/news/exists?url={{encodeURIComponent($json.url)}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        -16
+      ],
+      "id": "09d2cd2c-38d2-4561-be87-67ba95c8cd1e",
+      "name": "HTTP Request (Check Exists)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "957c03d5-8adb-4a58-aab4-f53fd846ed65",
+              "leftValue": "={{ ($json.exists ?? $json.data?.exists) !== true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        -96
+      ],
+      "id": "5654ec94-d72e-4a5f-b47f-4506c914079a",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PER_SOURCE = 1;\n\n/* ---------------- Helpers ---------------- */\nfunction firstNonEmpty(...arr){\n  for (const v of arr){\n    if (v === undefined || v === null) continue;\n    const s = String(v).trim();\n    if (s) return s;\n  }\n  return \"\";\n}\nfunction stripHtml(html=\"\"){\n  return String(html)\n    .replace(/<br\\s*\\/?>/gi, \" \")\n    .replace(/<\\/p>/gi, \". \")\n    .replace(/<[^>]+>/g, \" \")\n    .replace(/\\s{2,}/g, \" \")\n    .trim();\n}\nfunction extractH2(html=\"\"){\n  const m = String(html).match(/<h2[^>]*>([\\s\\S]*?)<\\/h2>/i);\n  return m ? stripHtml(m[1]).slice(0, 200) : \"\";\n}\nfunction asTime(j) {\n  const s = j.publishedAt || j.isoDate || j.pubDate || j.date || j.updated;\n  const t = s ? Date.parse(s) : 0;\n  return Number.isFinite(t) ? t : 0;\n}\nfunction normUrl(u) {\n  if (!u) return \"\";\n  try {\n    const url = new URL(String(u));\n    url.hash = \"\";\n    [\"utm_source\",\"utm_medium\",\"utm_campaign\",\"utm_term\",\"utm_content\",\"gclid\",\"fbclid\",\"ref\"]\n      .forEach(k => url.searchParams.delete(k));\n    return url.toString().replace(/\\?$/, \"\").replace(/\\/$/, \"\").toLowerCase();\n  } catch {\n    return String(u).trim().toLowerCase().replace(/[#?].*$/, \"\").replace(/\\/$/, \"\");\n  }\n}\nfunction hostOf(u) {\n  try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\\./,''); }\n  catch {\n    const m = String(u||\"\").match(/\\/\\/([^/]+)/);\n    return m ? m[1].toLowerCase().replace(/^www\\./,'') : \"\";\n  }\n}\nfunction cleanStr(v) {\n  if (v === undefined || v === null) return null;\n  const s = String(v).trim();\n  return s.length ? s : null;\n}\n\n/* ---------------- /api/sources çıktısından host → meta haritası ---------------- */\nfunction getSourcesArray() {\n  const names = [\n    \"Split Out\",\n    \"HTTP Request (GET /api/sources)\",\n    \"GET /api/sources\",\n    \"HTTP Request\",\n    \"Http Request\",\n  ];\n  for (const nm of names) {\n    try {\n      const arr = $items(nm, 0);\n      if (Array.isArray(arr) && arr.length) {\n        const data = arr[0]?.json?.data ?? arr.map(x => x?.json).filter(Boolean);\n        if (Array.isArray(data)) return data;\n      }\n    } catch (_) {}\n  }\n  return [];\n}\nconst SOURCES = getSourcesArray();\n\nfunction metaHostOf(sourceRow) {\n  // önce website_url host, yoksa rss_url host\n  const wh = cleanStr(sourceRow?.website_url) ? hostOf(sourceRow.website_url) : \"\";\n  if (wh) return wh;\n  const rh = cleanStr(sourceRow?.rss_url) ? hostOf(sourceRow.rss_url) : \"\";\n  return rh || \"\";\n}\n\nconst META_BY_HOST = new Map();\nfor (const s of SOURCES) {\n  const h = metaHostOf(s);\n  if (!h) continue;\n  // aynı host tekrar gelirse ilk geleni koru (ya da istersen üzerine yaz)\n  if (!META_BY_HOST.has(h)) {\n    META_BY_HOST.set(h, {\n      source_id: s.id ?? null,\n      source:    s.name ?? null,\n      province:  s.province ?? null,\n      city_id:   s.city_id ?? null,\n      rss_url:   s.rss_url ?? null,\n    });\n  }\n}\n\n/* ---------------- 1) YALNIZCA URL HOST’una göre gruplama ---------------- */\nconst groups = new Map();\nfor (const it of items) {\n  const j = it.json || {};\n  const rawUrl = firstNonEmpty(j.link, j.url, j.guid, j.id);\n  const h = hostOf(rawUrl);\n  if (!h) continue; // host yoksa atla\n  const arr = groups.get(h) || [];\n  arr.push(j);\n  groups.set(h, arr);\n}\n\n/* ---------------- 2) Her host’tan en yeni PER_SOURCE + URL tekilleştir ---------------- */\nconst out = [];\nfor (const [host, arr] of groups) {\n  // en yeni önce\n  arr.sort((a, b) => asTime(b) - asTime(a));\n  const seen = new Set();\n  let taken = 0;\n\n  // host’tan meta çek (yoksa grup içinden en dolu item’dan tamamlarız)\n  const hostMeta = META_BY_HOST.get(host) || null;\n\n  // grup içindeki en dolu meta’yı hazırla (backup)\n  const backupMeta = { source_id:null, source:null, province:null, city_id:null, rss_url:null };\n  for (const j of arr) {\n    if (!backupMeta.source_id && j.source_id) backupMeta.source_id = j.source_id;\n    if (!backupMeta.source && j.source)       backupMeta.source    = j.source;\n    if (!backupMeta.province && j.province)   backupMeta.province  = j.province;\n    if (!backupMeta.city_id && j.city_id!=null) backupMeta.city_id = j.city_id;\n    if (!backupMeta.rss_url && j.rss_url)     backupMeta.rss_url   = j.rss_url;\n  }\n\n  for (const j of arr) {\n    const rawUrl = firstNonEmpty(j.link, j.url, j.guid, j.id);\n    const url = normUrl(rawUrl);\n    if (!url || seen.has(url)) continue;\n    seen.add(url);\n\n    // başlık/özet\n    const fromH2 = extractH2(j[\"content:encoded\"] || j.content || \"\");\n    const fromCats1 = Array.isArray(j.categories) ? String(j.categories[1] ?? \"\").trim() : \"\";\n    const fromCats0 = Array.isArray(j.categories) ? String(j.categories[0] ?? \"\").trim() : \"\";\n    const fromFirstSentence = stripHtml(\n      j[\"content:encoded\"] || j.content || j.description || j.contentSnippet || \"\"\n    ).split(/[.!?]\\s/)[0].slice(0, 120);\n\n    const title =\n      firstNonEmpty(j.title, fromH2, fromCats1, fromCats0, fromFirstSentence) || \"Başlık yok\";\n\n    const summary = stripHtml(\n      j.contentSnippet || j.description || j.content || j[\"content:encoded\"] || \"\"\n    ).slice(0, 600);\n\n    const publishedAt =\n      firstNonEmpty(j.publishedAt, j.isoDate, j.pubDate, j.pubdate) || null;\n\n    // meta: host meta → item meta → backup meta\n    const mergedMeta = {\n      ...(hostMeta || {}),\n      source_id: (hostMeta?.source_id ?? j.source_id ?? backupMeta.source_id) ?? null,\n      source:    (hostMeta?.source    ?? j.source    ?? backupMeta.source)    ?? null,\n      province:  (hostMeta?.province  ?? j.province  ?? backupMeta.province)  ?? null,\n      city_id:   (hostMeta?.city_id   ?? j.city_id   ?? backupMeta.city_id)   ?? null,\n      rss_url:   (hostMeta?.rss_url   ?? j.rss_url   ?? backupMeta.rss_url)   ?? null,\n    };\n\n    out.push({\n      json: {\n        title,\n        url,\n        summary,\n        publishedAt,\n        ...mergedMeta,\n      }\n    });\n\n    taken += 1;\n    if (taken >= PER_SOURCE) break; // her HOST’tan 1 haber\n  }\n}\n\n/* ---------------- 3) Sonuç ---------------- */\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        -176
+      ],
+      "id": "5744599d-b947-4503-ba5c-c697ae73787d",
+      "name": "Code (One per Source)"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "includeUnpaired": true
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1184,
+        -96
+      ],
+      "id": "4c448611-141a-4b94-93ef-9df627e75fbd",
+      "name": "Merge (Keep Original + Exists)",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "zMBm9FgraST5EzDv",
+          "mode": "list",
+          "cachedResultName": "Ek- Enrich and Save News"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "publishedAt",
+              "displayName": "publishedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "source_id",
+              "displayName": "source_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "province",
+              "displayName": "province",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "city_id",
+              "displayName": "city_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "rss_url",
+              "displayName": "rss_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        -112
+      ],
+      "id": "a3931098-0fbb-4e60-823d-06a4832dedef",
+      "name": "Call 'Ek- Enrich and Save News'"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Mode: Run Once for Each Item\n\nconst j = $json;\n\n// küçük yardımcılar\nconst S  = v => (v == null ? '' : String(v).trim());\nconst ID = v => (v == null ? null : String(v));\nconst ISO = v => {\n  if (!v) return null;\n  const d = new Date(v);\n  return Number.isFinite(d.getTime()) ? d.toISOString() : null;\n};\n\n// TEK ÖĞE döndür: { json: {...} }  (DİZİ DÖNDÜRMEYİN!)\nconst out = {\n  title:       S(j.title) || 'Başlık yok',\n  url:         S(j.url ?? j.link),\n  summary:     S(j.summary),\n  publishedAt: ISO(j.publishedAt ?? j.isoDate ?? j.pubDate),\n\n  source_id:   ID(j.source_id),\n  source:      S(j.source) || null,\n  province:    S(j.province) || null,\n  city_id:     j.city_id != null ? String(j.city_id) : null,\n  rss_url:     S(j.rss_url) || null,\n};\n\nreturn { json: out };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -112
+      ],
+      "id": "9807eadf-ee81-4b6f-8223-0d96c1869f80",
+      "name": "Code"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Code (Attach Source Fields)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (Attach Source Fields)": {
+      "main": [
+        [
+          {
+            "node": "Code (One per Source)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request (Check Exists)": {
+      "main": [
+        [
+          {
+            "node": "Merge (Keep Original + Exists)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (One per Source)": {
+      "main": [
+        [
+          {
+            "node": "Merge (Keep Original + Exists)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge (Keep Original + Exists)": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Call 'Ek- Enrich and Save News'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}
