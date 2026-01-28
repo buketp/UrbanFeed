@@ -1,4 +1,4 @@
-🏙️ ****UrbanFeed - Yerel Basın İzleme Sistemi****
+🏙️ **UrbanFeed - Yerel Basın İzleme Sistemi**
 
 UrbanFeed, yerel haber sitelerinden gelen verileri otomatik olarak toplayan, yapay zekâ (LLM) ile anlamlandıran ve merkezi bir yönetim panelinden sunan uçtan uca bir otomasyon projesidir. Bu sistem, dağınık yerel haber akışlarını tek bir noktada toplayarak "istek, şikayet, soru ve öneri" odaklı bir analiz sunar. 
 
